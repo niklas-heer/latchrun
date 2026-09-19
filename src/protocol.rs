@@ -53,6 +53,17 @@ pub enum Provider {
     PasswordStore,
 }
 
+impl Provider {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fake => "fake",
+            Self::OnePassword => "one_password",
+            Self::File => "file",
+            Self::PasswordStore => "password_store",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InputMode {
@@ -60,6 +71,23 @@ pub enum InputMode {
     Null,
     Pipe,
     Tty,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    #[default]
+    Cli,
+    Mcp,
+}
+
+impl Origin {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Mcp => "mcp",
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -372,6 +400,8 @@ pub enum Request {
         argv: Vec<String>,
         #[serde(default)]
         input: InputMode,
+        #[serde(default)]
+        origin: Origin,
     },
     Shell {
         session: String,
@@ -401,6 +431,17 @@ pub enum Request {
     },
     Prune {
         keep: usize,
+    },
+    Analytics {
+        days: u16,
+    },
+    Activity {
+        id: String,
+        agent: String,
+        tool: String,
+        duration_ms: u64,
+        success: bool,
+        source: String,
     },
     Signal {
         session: String,

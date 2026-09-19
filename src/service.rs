@@ -22,9 +22,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
+    analytics::{ActivityRecord, Analytics, OperationRecord},
     execution,
     protocol::{
-        Failure, InputMode, Profile, Request, Response, random_id, read_frame, validate_id,
+        Failure, InputMode, Origin, Profile, Request, Response, random_id, read_frame, validate_id,
         write_frame,
     },
 };
@@ -72,6 +73,9 @@ struct Operation {
     finished_at: Option<u64>,
     exit_code: Option<i32>,
     control: Control,
+    cache: String,
+    provider: String,
+    origin: String,
 }
 
 impl Operation {
@@ -97,6 +101,8 @@ struct State {
     used_operations: BTreeSet<String>,
     journal_path: Option<PathBuf>,
     journal_failed: bool,
+    analytics: Option<Analytics>,
+    analytics_path: Option<PathBuf>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -237,6 +243,7 @@ impl State {
         session: &str,
         operation: &str,
         argv: &[String],
+        origin: Origin,
     ) -> Result<String, Failure> {
         validate_id(operation)?;
         let id = self.session_id(session)?;
@@ -266,6 +273,7 @@ impl State {
                 "Operation capacity reached; existing IDs remain reserved.",
             ));
         }
+        let provider = profile.profile.provider.as_str().to_owned();
         self.used_operations.insert(operation.to_owned());
         self.operations.insert(
             operation.to_owned(),
@@ -278,6 +286,9 @@ impl State {
                 finished_at: None,
                 exit_code: None,
                 control: Arc::new(Mutex::new(None)),
+                cache: "unknown".into(),
+                provider,
+                origin: origin.as_str().into(),
             },
         );
         self.record("accepted", Some(&id), Some(operation));
@@ -306,6 +317,14 @@ impl State {
         let id = self.session_id(session).ok();
         let operation = validate_id(operation).is_ok().then_some(operation);
         self.record("denied", id.as_deref(), operation);
+        if self
+            .analytics
+            .as_ref()
+            .is_some_and(|db| db.record_denial(timestamp(), id.as_deref()).is_err())
+        {
+            self.journal_failed = true;
+            self.shutdown();
+        }
         let _ = self.persist();
     }
 }
@@ -346,11 +365,27 @@ struct SavedOperation {
     duration_ms: Option<u64>,
     finished_at: Option<u64>,
     exit_code: Option<i32>,
+    #[serde(default = "unknown_metadata")]
+    cache: String,
+    #[serde(default = "unknown_metadata")]
+    provider: String,
+    #[serde(default = "unknown_metadata")]
+    origin: String,
+}
+
+fn unknown_metadata() -> String {
+    "unknown".into()
 }
 
 impl State {
     fn protect_runtime(&self, profile: &mut Profile) -> Result<(), Failure> {
         if profile.sandbox.enabled {
+            if let Some(path) = self.analytics_path.as_ref().and_then(|p| p.parent()) {
+                let path = fs::canonicalize(path)?;
+                if !profile.sandbox.protected_paths.contains(&path) {
+                    profile.sandbox.protected_paths.push(path);
+                }
+            }
             if let Some(path) = self.journal_path.as_ref().and_then(|path| path.parent()) {
                 profile
                     .sandbox
@@ -403,6 +438,9 @@ impl State {
                             duration_ms: op.duration_ms,
                             finished_at: op.finished_at,
                             exit_code: op.exit_code,
+                            cache: op.cache.clone(),
+                            provider: op.provider.clone(),
+                            origin: op.origin.clone(),
                         },
                     )
                 })
@@ -412,7 +450,27 @@ impl State {
             sequence: self.sequence,
             denied: self.denied,
         };
-        let result = crate::journal::save(path, &snapshot);
+        let result = crate::journal::save(path, &snapshot).and_then(|()| {
+            if let Some(db) = &self.analytics {
+                let records = self
+                    .operations
+                    .iter()
+                    .map(|(id, op)| OperationRecord {
+                        session: op.session.clone(),
+                        operation: id.clone(),
+                        started_at: op.started_at,
+                        status: op.status.into(),
+                        duration_ms: op.duration_ms,
+                        finished_at: op.finished_at,
+                        cache: op.cache.clone(),
+                        provider: op.provider.clone(),
+                        origin: op.origin.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                db.record_operations(&records)?;
+            }
+            Ok(())
+        });
         if result.is_err() {
             self.journal_failed = true;
             self.shutdown();
@@ -420,9 +478,12 @@ impl State {
         result
     }
 
-    fn recover(runtime: &Path) -> Result<Self, Failure> {
+    fn recover(runtime: &Path, data: &Path) -> Result<Self, Failure> {
         let path = runtime.join("history.json");
+        let database = data.join("analytics.sqlite3");
         let mut state = Self {
+            analytics: Some(Analytics::open(&database)?),
+            analytics_path: Some(database),
             journal_path: Some(path.clone()),
             ..Self::default()
         };
@@ -486,10 +547,13 @@ impl State {
                     },
                     started_at: op.started_at,
                     started: Instant::now(),
-                    duration_ms: op.duration_ms.or(Some(0)),
+                    duration_ms: op.duration_ms,
                     finished_at: op.finished_at,
                     exit_code: op.exit_code,
                     control: Arc::new(Mutex::new(None)),
+                    cache: op.cache,
+                    provider: op.provider,
+                    origin: op.origin,
                 },
             );
         }
@@ -627,6 +691,12 @@ fn dispatch(state: &mut State, request: Request) -> Result<Value, Failure> {
         return Err(Failure::new("service_stopping", "The service is stopping."));
     }
     match request {
+        Request::Analytics { days } => state.analytics.as_ref().ok_or_else(|| Failure::new("analytics_unavailable", "Analytics storage is unavailable."))?.query(days),
+        Request::Activity { id, agent, tool, duration_ms, success, source } => {
+            state.analytics.as_ref().ok_or_else(|| Failure::new("analytics_unavailable", "Analytics storage is unavailable."))?
+                .record_activity(&ActivityRecord { id, agent, tool, duration_ms, success, source, at: timestamp() })?;
+            Ok(json!({"status":"recorded"}))
+        }
         Request::Ping {} => Ok(json!({"status":"running","version":env!("CARGO_PKG_VERSION"),
             "statistics":{"accepted":state.used_operations.len(),"denied":state.denied,
                 "running":state.operations.values().filter(|op|op.active()).count(),
@@ -717,6 +787,23 @@ fn launch(
         .filter(|s| s.status == "active" && !state.stopping)
         .ok_or_else(|| Failure::new("session_inactive", "Session is stopped or expired."))?;
     // spawn only starts a guardian; provider resolution happens after this lock is released.
+    let cache = if profile.profile.credentials.is_empty() {
+        "none"
+    } else if profile.profile.cache_ttl_seconds == 0 {
+        "disabled"
+    } else if profile.cache.values.is_some() {
+        "hit"
+    } else {
+        "miss"
+    };
+    if let Some(op) = state.operations.get_mut(operation) {
+        op.cache = cache.into();
+    }
+    state.persist()?;
+    let profile = state
+        .sessions
+        .get(session)
+        .ok_or_else(|| Failure::new("session_inactive", "Session is stopped or expired."))?;
     let generation = profile.cache.generation;
     let worker = execution::spawn(&profile.profile, argv, profile.cache.values.clone(), input)?;
     if let Some(op) = state.operations.get_mut(operation) {
@@ -841,6 +928,7 @@ fn handle(state: &Shared, mut stream: UnixStream) {
                     operation,
                     argv,
                     input,
+                    origin: Origin::Cli,
                 },
                 Err(error) => {
                     let mut state = lock(state);
@@ -858,12 +946,13 @@ fn handle(state: &Shared, mut stream: UnixStream) {
         operation,
         mut argv,
         input,
+        origin,
     } = request
     {
         let reserved = normalize_executable(&mut argv).and_then(|()| {
             let mut state = lock(state);
             state.expire(Instant::now());
-            state.reserve(&session, &operation, &argv)
+            state.reserve(&session, &operation, &argv, origin)
         });
         match reserved {
             Ok(id) => run_operation(state, Some(stream), &id, &operation, &argv, input),
@@ -992,11 +1081,11 @@ impl Drop for ClientGuard {
     }
 }
 
-pub fn serve(runtime: &Path) -> Result<(), Failure> {
+pub fn serve(runtime: &Path, data: &Path) -> Result<(), Failure> {
     nix::sys::resource::setrlimit(nix::sys::resource::Resource::RLIMIT_CORE, 0, 0)
         .map_err(|_| Failure::new("service_error", "Cannot disable core dumps."))?;
     let (listener, _lock, _socket) = listener(runtime)?;
-    let state = Arc::new(Mutex::new(State::recover(runtime)?));
+    let state = Arc::new(Mutex::new(State::recover(runtime, data)?));
     let stopping = Arc::new(AtomicBool::new(false));
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
         signal_hook::flag::register(signal, Arc::clone(&stopping))
@@ -1112,20 +1201,20 @@ mod tests {
     fn reserved_ids_survive_outcomes_and_expiry() -> Result<(), Failure> {
         let now = Instant::now();
         let (mut state, argv) = fixture(now)?;
-        state.reserve("work", "operation", &argv)?;
+        state.reserve("work", "operation", &argv, Origin::Cli)?;
         state.finish("operation", "unknown", None);
         assert!(
-            matches!(state.reserve("work", "operation", &argv), Err(error) if error.code == "duplicate_operation")
+            matches!(state.reserve("work", "operation", &argv, Origin::Cli), Err(error) if error.code == "duplicate_operation")
         );
         state.expire(now + Duration::from_secs(9));
         assert_eq!(state.session_view("session")["status"], "active");
         state.expire(now + Duration::from_secs(10));
         assert_eq!(state.session_view("session")["status"], "expired");
         assert!(
-            matches!(state.reserve("work", "new-operation", &argv), Err(error) if error.code == "session_inactive")
+            matches!(state.reserve("work", "new-operation", &argv, Origin::Cli), Err(error) if error.code == "session_inactive")
         );
         assert!(
-            matches!(state.reserve("work", "operation", &argv), Err(error) if error.code == "duplicate_operation")
+            matches!(state.reserve("work", "operation", &argv, Origin::Cli), Err(error) if error.code == "duplicate_operation")
         );
         assert!(State::default().session_id("work").is_err());
         Ok(())
@@ -1134,7 +1223,7 @@ mod tests {
     #[test]
     fn stop_between_acceptance_and_spawn_denies_execution() -> Result<(), Failure> {
         let (mut state, argv) = fixture(Instant::now())?;
-        state.reserve("work", "operation", &argv)?;
+        state.reserve("work", "operation", &argv, Origin::Cli)?;
         state.stop_session("session", "stopped");
         let state = Arc::new(Mutex::new(state));
         assert!(
@@ -1148,14 +1237,14 @@ mod tests {
         let (mut state, argv) = fixture(Instant::now())?;
         for number in 0..MAX_OPERATIONS {
             let operation = format!("{number:064}");
-            state.reserve("work", &operation, &argv)?;
+            state.reserve("work", &operation, &argv, Origin::Cli)?;
             state.finish(&operation, "succeeded", Some(0));
         }
         assert!(
-            matches!(state.reserve("work", "overflow", &argv), Err(error) if error.code == "capacity")
+            matches!(state.reserve("work", "overflow", &argv, Origin::Cli), Err(error) if error.code == "capacity")
         );
         assert!(
-            matches!(state.reserve("work", &format!("{:064}", 0), &argv), Err(error) if error.code == "duplicate_operation")
+            matches!(state.reserve("work", &format!("{:064}", 0), &argv, Origin::Cli), Err(error) if error.code == "duplicate_operation")
         );
         let response = Response::Ok {
             data: dispatch(&mut state, Request::Status { session: None })?,
@@ -1190,7 +1279,7 @@ mod tests {
                         expired = true;
                     }
                     _ => {
-                        let result = state.reserve("work", &operation, &argv);
+                        let result = state.reserve("work", &operation, &argv, Origin::Cli);
                         if known {
                             assert!(
                                 matches!(result, Err(error) if error.code == "duplicate_operation")

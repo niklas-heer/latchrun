@@ -10,17 +10,39 @@
 @media(max-width:960px){main{padding-top:30px}.workspace{grid-template-columns:1fr}.session-list{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}.session{margin:0}.stats{gap:10px}.stat{padding:17px}.intro-actions .subtle{display:none}}
 @media(max-width:580px){header{height:65px}.header-right .local{display:none}main{padding:26px 18px 20px}header{padding:0 18px}h1{font-size:28px}.intro{align-items:start}.intro p{font-size:12px}.intro-actions button{padding:9px;font-size:11px}.stats{grid-template-columns:repeat(2,1fr)}.stat-number{font-size:28px}.session-list{display:block}.detail-title{align-items:start;flex-direction:column}.detail-actions{margin-top:8px}.detail-meta{gap:15px}.panel-head,.detail-top{padding-left:17px;padding-right:17px}.tabs{padding:0 17px;gap:22px}.tab-content{padding:17px}.timeline{padding:5px 17px}.event{grid-template-columns:7px 1fr;gap:10px}.event time{grid-column:2}footer{flex-direction:column}.brand{font-size:20px}}
 @media(prefers-color-scheme:dark){:root{color:#e1eae6;background:#131b18;--panel:#1a2420;--line:#2b3b33;--muted:#91a69b;--accent:#7acdaf;--soft:#243b30;--danger:#ed9d8f;--shadow:0 3px 20px #0001}.logo,.primary{background:#267e60;color:white;border-color:#267e60}.session.selected{border-color:#456b58}.badge.inactive{background:#303a35;color:#acb8b0}.badge.bad{background:#49332b;color:#ed9d8f}.banner{background:#3a2c21;color:#e8c5a6;border-color:#775138}}
+
+.analytics{margin-bottom:38px}.section-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:0 0 18px}.section-heading h2{font-size:17px;letter-spacing:-.35px;font-weight:650;margin:0 0 6px}.section-heading p{font-size:11px;color:var(--muted);margin:0;line-height:1.6}.range-control{display:flex;align-items:center;gap:10px;flex-shrink:0}.range-control label{font-size:11px;color:var(--muted)}select{border:1px solid var(--line);border-radius:8px;background:var(--panel);color:inherit;padding:9px 30px 9px 12px;font-size:12px;cursor:pointer}select:focus-visible{outline:3px solid #39ac87;outline-offset:3px}.analytics-stats{margin-bottom:20px}.analytics-stats .stat-note{line-height:1.7}.analytics-stats .stat-number{font-size:29px;white-space:nowrap}.unit{font-size:9px;letter-spacing:.3px}.chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.outcome-panel{grid-column:1/-1}.panel-head h3{font-size:13px;font-weight:650;margin:0}.panel-head p{font-size:10px;color:var(--muted);margin:5px 0 0;line-height:1.6}.chart-body{padding:17px 22px 12px}.chart-slot{min-height:176px}.chart-slot svg{width:100%;height:auto;display:block;overflow:visible}.outcome-panel .chart-slot svg{max-height:205px}.chart-slot .empty{padding:45px 15px}.legend{display:flex;gap:15px;flex-wrap:wrap;font-size:10px;color:var(--muted);margin-bottom:17px}.legend span{display:flex;align-items:center;gap:6px}.key{width:8px;height:8px;display:inline-block;border-radius:2px}.succeeded-key{background:#53a884}.failed-key{background:#d9906b}.unknown-key{background:#9d92c0}.denied-key{background:#8b99a4}.median-key{background:#53a884}.tail-key{background:#9d92c0}.miss-key{background:#b7b2a1}.chart-gridline{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}.chart-axis{fill:var(--muted);font-size:9px;font-family:inherit}.chart-bar{opacity:.92}.chart-bar:hover{opacity:1;stroke:var(--panel);stroke-width:1}.chart-succeeded,.chart-hit{fill:#53a884}.chart-failed{fill:#d9906b}.chart-unknown{fill:#9d92c0}.chart-denied{fill:#8b99a4}.chart-miss{fill:#b7b2a1}.chart-line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.chart-median{stroke:#53a884}.chart-tail{stroke:#9d92c0}.chart-point{stroke:var(--panel);stroke-width:1.5}.chart-median-point{fill:#53a884}.chart-tail-point{fill:#9d92c0}.agent-panel{margin-top:20px}.agent-body{padding:8px 22px;max-height:400px;overflow:auto}.agent-body td{padding-top:14px;padding-bottom:14px}.agent-source{display:inline-block;font-size:10px;color:var(--muted);border:1px solid var(--line);padding:3px 7px;border-radius:5px}.analytics-note{font-size:10px;color:var(--muted);line-height:1.7;border-top:1px solid var(--line);margin:0;padding:13px 22px}.analytics-data{font-size:11px;color:var(--muted);margin:17px 0 0}.analytics-data summary{cursor:pointer;width:fit-content;font-size:11px}.analytics-data p{line-height:1.8;max-width:850px}.analytics-data .table-wrap{background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:330px;padding:15px}.analytics-data table{min-width:650px}.analytics-data th{position:sticky;top:-15px;background:var(--panel);padding-top:10px}.live-heading{padding-top:27px;border-top:1px solid var(--line)}.live-indicator{font-size:10px;color:var(--muted)}
+@media(max-width:960px){.analytics-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.chart-body{padding-left:17px;padding-right:17px}}
+@media(max-width:580px){.section-heading{align-items:flex-start;flex-direction:column;gap:12px}.range-control{width:100%;justify-content:space-between}.range-control select{flex:1;max-width:180px}.chart-grid{grid-template-columns:1fr;gap:15px}.outcome-panel{grid-column:auto}.analytics-stats .stat-number{font-size:24px}.analytics-stats .stat-label{font-size:10px}.analytics-stats .unit{display:none}.legend{gap:10px;font-size:9px}.chart-slot{min-height:130px}.chart-body{padding:15px 16px 10px}.agent-body{padding:6px 17px}.agent-body table{min-width:520px}.analytics-note{padding:12px 17px}.analytics{margin-bottom:26px}}
 </style>
 </head>
 <body>
 <header><div class="brand"><span class="logo" aria-hidden="true">⟦⟧</span>latchrun</div><div class="header-right"><span class="local">LOCAL WORKSPACE</span><span id="connection"><i class="dot"></i>Connecting</span></div></header>
 <main>
-<div class="intro"><div><div class="eyebrow">Your local control room</div><h1>Work sessions</h1><p>Understand what's running. Keep access in scope.</p></div><div class="intro-actions"><span id="updated" class="subtle">Waiting for service</span><button id="reload" type="button">↻ Refresh</button></div></div>
+<div class="intro"><div><div class="eyebrow">Your local control room</div><h1>Session intelligence</h1><p>See your activity over time. Keep access in scope.</p></div><div class="intro-actions"><span id="updated" class="subtle">Waiting for service</span><button id="reload" type="button">↻ Refresh</button></div></div>
 <div class="banner" id="error" role="alert" hidden></div>
-<section class="stats" aria-label="Service statistics">
+<section class="analytics" aria-labelledby="analytics-title">
+<div class="section-heading"><div><h2 id="analytics-title">Activity over time</h2><p id="analytics-window">Historical activity recorded by your local service</p><p>UTC periods; current period is partial.</p></div><div class="range-control"><label for="analytics-days">Time range</label><select id="analytics-days"><option value="1">24-hour view</option><option value="7" selected>7 calendar days</option><option value="30">30 calendar days</option><option value="90">90 calendar days</option></select></div></div>
+<div id="analytics-error" class="banner" role="status" hidden></div>
+<div class="stats analytics-stats" aria-label="Historical analytics">
+<div class="stat"><div class="stat-label">Commands accepted<span aria-hidden="true">↗</span></div><div id="history-accepted" class="stat-number">—</div><div id="history-outcomes" class="stat-note">Within the selected window</div></div>
+<div class="stat"><div class="stat-label">Success rate<span aria-hidden="true">✓</span></div><div id="history-success" class="stat-number good">—</div><div id="history-denied" class="stat-note">Succeeded / all final outcomes</div></div>
+<div class="stat"><div class="stat-label">Median command latency</div><div id="history-p50" class="stat-number">—</div><div id="history-tail" class="stat-note">No completed command samples</div></div>
+<div class="stat"><div class="stat-label">Credential cache hit rate<span aria-hidden="true">◈</span></div><div id="history-cache" class="stat-number">—</div><div id="history-cache-counts" class="stat-note">No credential lookups recorded</div></div>
+</div>
+<div class="chart-grid">
+<section class="panel outcome-panel"><div class="panel-head"><div><h3>Command outcomes</h3><p>Final outcomes and denied requests</p></div><span id="history-sessions" class="subtle">— sessions</span></div><div class="chart-body"><div class="legend"><span><i class="key succeeded-key"></i>Succeeded</span><span><i class="key failed-key"></i>Failed</span><span><i class="key unknown-key"></i>Unknown</span><span><i class="key denied-key"></i>Denied</span></div><div id="outcome-chart" class="chart-slot"><div class="empty">Loading historical activity…</div></div></div></section>
+<section class="panel"><div class="panel-head"><div><h3>Latency over time</h3><p>Command duration · milliseconds</p></div></div><div class="chart-body"><div class="legend"><span><i class="key median-key"></i>p50 median</span><span><i class="key tail-key"></i>p95 tail</span></div><div id="latency-chart" class="chart-slot"><div class="empty">Loading durations…</div></div></div></section>
+<section class="panel"><div class="panel-head"><div><h3>Credential reuse</h3><p>Cache hits and fresh resolutions</p></div></div><div class="chart-body"><div class="legend"><span><i class="key succeeded-key"></i>Cache hits</span><span><i class="key miss-key"></i>Cache misses</span></div><div id="cache-chart" class="chart-slot"><div class="empty">Loading cache activity…</div></div></div></section>
+</div>
+<section class="panel agent-panel"><div class="panel-head"><div><h3>Reported agent activity</h3><p>Automatic MCP activity and explicitly reported tool calls</p></div><span id="agent-total" class="subtle">— calls</span></div><div class="agent-body" id="agent-usage"><div class="empty">Loading reported activity…</div></div><p id="agent-limit" class="analytics-note" hidden>Showing the 100 most active agent/tool/source rows. Totals include all reported calls.</p><p class="analytics-note">This covers calls mediated by Latchrun or explicitly reported to it. Other agent tools are not observed. Agent labels are caller-supplied; source identifies how activity was recorded.</p></section>
+<details class="analytics-data"><summary>View chart data and measurement details</summary><p>All durations are in milliseconds. Percentiles use completed command samples; gaps mean no samples. Cache hit rate is hits ÷ (hits + misses). Durations include provider lookup. Cache decisions count commands with credentials and caching enabled; a miss requests fresh resolution and does not guarantee success. Outcomes are grouped by command start time. Periods follow UTC boundaries; the current period is partial. Displayed times use this browser’s local timezone.</p><div id="analytics-table" class="table-wrap"></div><p id="analytics-retention">Historical analytics are retained locally across service restarts and session-history pruning. The selected window limits this view; it does not delete older records.</p></details>
+</section>
+<div class="section-heading live-heading"><div><h2>Sessions now</h2><p>Current service state and retained operation detail</p></div><span class="live-indicator"><i class="dot"></i>Live · refreshes every 5 seconds</span></div>
+<section class="stats" aria-label="Current service statistics">
 <div class="stat"><div class="stat-label">Active sessions<span aria-hidden="true">◉</span></div><div id="stat-sessions" class="stat-number">—</div><div class="stat-note">Scoped work environments</div></div>
 <div class="stat"><div class="stat-label">Commands running<span aria-hidden="true">↗</span></div><div id="stat-running" class="stat-number">—</div><div id="stat-accepted" class="stat-note">Mediated by Latchrun</div></div>
-<div class="stat"><div class="stat-label">Succeeded<span aria-hidden="true">✓</span></div><div id="stat-succeeded" class="stat-number good">—</div><div class="stat-note">Completed with exit code 0</div></div>
+<div class="stat"><div class="stat-label">Succeeded<span aria-hidden="true">✓</span></div><div id="stat-succeeded" class="stat-number good">—</div><div class="stat-note">Retained successful commands</div></div>
 <div class="stat"><div class="stat-label">Needs attention<span aria-hidden="true">◇</span></div><div id="stat-attention" class="stat-number">—</div><div id="stat-denied" class="stat-note">Failures, unknowns & policy denials</div></div>
 </section>
 <div class="workspace">
@@ -37,6 +59,7 @@ let token = fragment.get('token');
 try { if (token) sessionStorage.setItem('latchrun-token', token); else token = sessionStorage.getItem('latchrun-token'); } catch (_) { /* In-memory authentication still works when browser storage is disabled. */ }
 history.replaceState(null, '', location.pathname);
 let sessions = [], events = [], selected = null, currentTab = 'commands', busy = false, inspection = null;
+let analyticsRequest = 0, analyticsLoaded = false;
 const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
 const number = value => new Intl.NumberFormat().format(value || 0);
 const when = value => value ? new Date(value * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
@@ -53,6 +76,93 @@ async function api(path, body) {
   return data;
 }
 function table(headers, rows) { const wrap = el('div', undefined, 'table-wrap'), result = el('table'), head = el('tr'), body = el('tbody'); headers.forEach(label => head.append(el('th', label))); const thead = el('thead'); thead.append(head); rows.forEach(cells => { const row = el('tr'); cells.forEach(cell => { const td = el('td'); if (cell instanceof Node) td.append(cell); else td.textContent = cell; row.append(td); }); body.append(row); }); result.append(thead, body); wrap.append(result); return wrap; }
+
+const svgNode = (tag, attributes = {}, text) => { const node = document.createElementNS('http://www.w3.org/2000/svg', tag); Object.entries(attributes).forEach(([key,value]) => node.setAttribute(key,String(value))); if (text !== undefined) node.textContent = text; return node; };
+const metric = value => Number.isFinite(Number(value)) && value !== null ? Math.max(0, Number(value)) : null;
+const ms = value => metric(value) === null ? '—' : `${number(value)} ms`;
+function bucketLabel(timestamp, days, full = false) { const date = new Date(timestamp * 1000); return date.toLocaleString([], full ? {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'} : days === 1 ? {hour:'2-digit',minute:'2-digit'} : {month:'short',day:'numeric'}); }
+function graphFrame(target, label, buckets, days, maximum) {
+  target.replaceChildren();
+  const width = Math.max(600, target.clientWidth), height = 190, left = 45, right = 12, top = 13, bottom = 30;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const ceiling = Math.max(1, Math.ceil(maximum));
+  const svg = svgNode('svg',{viewBox:`0 0 ${width} ${height}`,role:'img','aria-label':label});
+  svg.append(svgNode('title',{},label),svgNode('desc',{},'Read exact values in the chart data table below. Times use the browser timezone.'));
+  for (const tick of [...new Set([0,Math.round(ceiling/2),ceiling])]) {
+    const y = top + plotHeight * (1 - tick/ceiling);
+    svg.append(svgNode('line',{x1:left,y1:y,x2:width-right,y2:y,class:'chart-gridline'}));
+    svg.append(svgNode('text',{x:left-9,y:y+3,'text-anchor':'end',class:'chart-axis'},new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(tick)));
+  }
+  const band = plotWidth / Math.max(1,buckets.length);
+  const ticks = [...new Set([0,Math.floor((buckets.length-1)/2),buckets.length-1])];
+  ticks.filter(index => index >= 0).forEach(index => { const x = left + band * (index+.5); svg.append(svgNode('text',{x,y:height-8,'text-anchor':index===0?'start':index===buckets.length-1?'end':'middle',class:'chart-axis'},bucketLabel(buckets[index].start,days))); });
+  target.append(svg);
+  return {svg,left,top,band,plotHeight,ceiling,x:index=>left+band*(index+.5),y:value=>top+plotHeight*(1-value/ceiling)};
+}
+function stackedChart(target, buckets, days, series, label, emptyLabel) {
+  const totals = buckets.map(bucket => series.reduce((total,item) => total+(metric(bucket[item.key]) || 0),0));
+  const maximum = Math.max(0,...totals);
+  if (!buckets.length || maximum === 0) { target.replaceChildren(empty(emptyLabel,'Recorded activity will appear here as it happens.')); return; }
+  const frame = graphFrame(target,label,buckets,days,maximum);
+  buckets.forEach((bucket,index) => {
+    let accumulated = 0;
+    series.forEach(item => {
+      const value = metric(bucket[item.key]) || 0;
+      if (!value) return;
+      const bar = svgNode('rect',{x:frame.left+frame.band*index+frame.band*.18,y:frame.y(accumulated+value),width:Math.max(.5,frame.band*.64),height:Math.max(.6,frame.plotHeight*value/frame.ceiling),rx:Math.min(2,frame.band*.1),class:`chart-bar ${item.className}`});
+      bar.append(svgNode('title',{},`${bucketLabel(bucket.start,days,true)} · ${item.label}: ${number(value)}`)); frame.svg.append(bar); accumulated += value;
+    });
+  });
+}
+function latencyChart(buckets, days) {
+  const target = $('latency-chart'), values = buckets.flatMap(bucket => [metric(bucket.p50_ms),metric(bucket.p95_ms)]).filter(value => value !== null);
+  if (!values.length) {target.replaceChildren(empty('No duration samples yet','Finished commands will populate the median and tail latency.'));return;}
+  const frame = graphFrame(target,'Command latency: p50 and p95 in milliseconds',buckets,days,Math.max(...values));
+  [['p50_ms','median','p50'],['p95_ms','tail','p95']].forEach(([key,style,label]) => {
+    let path = '', previous = false;
+    buckets.forEach((bucket,index) => {const value = metric(bucket[key]); if (value === null) {previous=false;return;} path += `${previous?'L':'M'}${frame.x(index)},${frame.y(value)} `;previous=true;});
+    frame.svg.append(svgNode('path',{d:path,class:`chart-line chart-${style}`}));
+    buckets.forEach((bucket,index) => {const value = metric(bucket[key]);if(value===null)return;const point=svgNode('circle',{cx:frame.x(index),cy:frame.y(value),r:3,class:`chart-point chart-${style}-point`});point.append(svgNode('title',{},`${bucketLabel(bucket.start,days,true)} · ${label}: ${ms(value)}`));frame.svg.append(point);});
+  });
+}
+function renderAnalytics(data) {
+  const totals = data.totals || {}, latency = data.latency || {}, cache = data.cache || {}, buckets = data.timeline || [], agents = data.agents || [];
+  const days = Number(data.days), finalOutcomes = (totals.succeeded || 0)+(totals.failed || 0)+(totals.unknown || 0);
+  $('analytics-window').textContent = `${bucketLabel(data.since,days,true)} – ${bucketLabel(data.until,days,true)} · ${days===1?'hourly':'daily'} · local time`;
+  $('history-accepted').textContent = number(totals.accepted);
+  $('history-outcomes').textContent = `${number(totals.succeeded)} succeeded · ${number(totals.failed)} failed · ${number(totals.unknown)} unknown`;
+  $('history-success').textContent = finalOutcomes ? `${(100*(totals.succeeded || 0)/finalOutcomes).toFixed(1)}%` : '—';
+  $('history-denied').textContent = `${number(totals.denied)} denied · ${number(totals.running)} still running`;
+  $('history-p50').textContent = ms(latency.p50_ms);
+  $('history-tail').textContent = `${number(latency.samples)} samples · p95 ${ms(latency.p95_ms)} · p99 ${ms(latency.p99_ms)}`;
+  const lookups = (cache.hits || 0)+(cache.misses || 0);
+  $('history-cache').textContent = lookups ? `${Number(cache.hit_rate_pct || 0).toFixed(1)}%` : '—';
+  $('history-cache-counts').textContent = `${number(cache.hits)} ${cache.hits===1?'hit':'hits'} · ${number(cache.misses)} ${cache.misses===1?'miss':'misses'} · cache-enabled commands`;
+  $('history-sessions').textContent = `${number(totals.sessions)} ${totals.sessions===1?'session':'sessions'} in this window`;
+  stackedChart($('outcome-chart'),buckets,days,[{key:'succeeded',className:'chart-succeeded',label:'Succeeded'},{key:'failed',className:'chart-failed',label:'Failed'},{key:'unknown',className:'chart-unknown',label:'Unknown'},{key:'denied',className:'chart-denied',label:'Denied'}],'Command outcomes and denied requests over time','No final outcomes or denials yet');
+  latencyChart(buckets,days);
+  stackedChart($('cache-chart'),buckets,days,[{key:'cache_hits',className:'chart-hit',label:'Cache hits'},{key:'cache_misses',className:'chart-miss',label:'Cache misses'}],'Credential cache hits and misses over time','No cache decisions in this window');
+  $('agent-limit').hidden = !data.agents_truncated;
+  $('agent-total').textContent = `${number(data.activity?.calls)} ${data.activity?.calls===1?'call':'calls'} · ${number(data.activity?.errors)} ${data.activity?.errors===1?'error':'errors'}`;
+  $('agent-usage').replaceChildren();
+  if (!agents.length) $('agent-usage').append(empty('No reported agent activity','MCP calls and explicitly reported external tool activity appear here.'));
+  else $('agent-usage').append(table(['Agent / tool','Source','Calls','Errors','p50','p95'],agents.map(agent => {const name = el('div',agent.agent,'env-name');name.append(el('span',agent.tool,'env-extra mono'));const source = agent.source === 'mcp' ? 'Automatic MCP' : agent.source === 'external' ? 'External report' : human(agent.source);return [name,el('span',source,'agent-source'),number(agent.calls),number(agent.errors),ms(agent.p50_ms),ms(agent.p95_ms)];})));
+  $('analytics-table').replaceChildren(table(['Period start','Accepted','Succeeded','Failed','Unknown','Denied','p50 (ms)','p95 (ms)','Cache hits','Cache misses'],buckets.map(bucket => [bucketLabel(bucket.start,days,true),number(bucket.accepted),number(bucket.succeeded),number(bucket.failed),number(bucket.unknown),number(bucket.denied),metric(bucket.p50_ms)===null?'—':number(bucket.p50_ms),metric(bucket.p95_ms)===null?'—':number(bucket.p95_ms),number(bucket.cache_hits),number(bucket.cache_misses)])));
+}
+async function loadAnalytics() {
+  const request = ++analyticsRequest, days = $('analytics-days').value;
+  $('analytics-title').parentElement.setAttribute('aria-busy','true');
+  try {
+    const data = await api(`/api/analytics?days=${days}`);
+    if (request !== analyticsRequest || days !== $('analytics-days').value) return;
+    renderAnalytics(data); analyticsLoaded = true; $('analytics-error').hidden = true;
+  } catch (failure) {
+    if (request !== analyticsRequest) return;
+    $('analytics-error').textContent = `Historical analytics unavailable. ${failure.message}${analyticsLoaded?' The previous snapshot remains displayed.':''}`;
+    $('analytics-error').hidden = false;
+  } finally {if (request === analyticsRequest) $('analytics-title').parentElement.setAttribute('aria-busy','false');}
+}
+
 function restoreFocus(id) { if (id) document.getElementById(id)?.focus({preventScroll:true}); }
 function renderSessions() {
   const focusedId = document.activeElement?.id;
@@ -120,13 +230,14 @@ async function refresh() {
     const [status, history] = await Promise.all([api('/api/status'),api('/api/events')]);
     sessions = status.sessions || []; events = history.events || []; const stats = status.service.statistics || {};
     if (!sessions.some(session => session.id === selected)) selected = sessions.find(session => session.status === 'active')?.id || sessions[0]?.id || null;
-    $('stat-sessions').textContent = number(sessions.filter(session => session.status === 'active').length); $('stat-running').textContent = number(stats.running); $('stat-accepted').textContent = `${number(stats.accepted)} commands accepted`; $('stat-succeeded').textContent = number(stats.succeeded); $('stat-attention').textContent = number((stats.failed || 0) + (stats.unknown || 0) + (stats.denied || 0)); $('stat-denied').textContent = `${number(stats.failed)} failed · ${number(stats.unknown)} unknown · ${number(stats.denied)} denied`;
+    $('stat-sessions').textContent = number(sessions.filter(session => session.status === 'active').length); $('stat-running').textContent = number(stats.running); $('stat-accepted').textContent = `${number(stats.accepted)} operation IDs reserved`; $('stat-succeeded').textContent = number(stats.succeeded); $('stat-attention').textContent = number((stats.failed || 0) + (stats.unknown || 0) + (stats.denied || 0)); $('stat-denied').textContent = `${number(stats.failed)} failed · ${number(stats.unknown)} unknown · ${number(stats.denied)} denied`;
     $('connection').replaceChildren(el('i',undefined,'dot'),document.createTextNode('Service connected')); $('version').textContent = status.service.version || ''; $('updated').textContent = `Updated ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
-    error(''); renderSessions(); renderDetail(); $('activity').replaceChildren(); renderEvents($('activity'),events.slice(-100).reverse()); await loadInspection();
+    error(''); renderSessions(); renderDetail(); $('activity').replaceChildren(); renderEvents($('activity'),events.slice(-100).reverse()); await Promise.all([loadInspection(),loadAnalytics()]);
   } catch (failure) { $('connection').textContent = 'Disconnected'; error(failure.message || 'Could not connect. Check that the local service and dashboard are running.'); }
   finally {$('reload').disabled = false; if (focusedReload && document.activeElement === document.body) restoreFocus('reload');}
 }
 $('reload').addEventListener('click',refresh);
+$('analytics-days').addEventListener('change',() => { $('analytics-window').textContent = 'Loading the selected time range…'; loadAnalytics(); });
 refresh();
 setInterval(() => {if (!document.hidden && !$('reload').disabled && !busy) refresh();},5000);
 </script>

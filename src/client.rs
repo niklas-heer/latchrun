@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::protocol::{
-    Failure, InputMode, MAX_FRAME, Profile, Request, Response, prepare_runtime, random_id,
+    Failure, InputMode, MAX_FRAME, Origin, Profile, Request, Response, prepare_runtime, random_id,
     read_frame, validate_id, write_frame,
 };
 use signal_hook::{
@@ -27,23 +27,50 @@ pub fn main_cli() -> Result<i32, Failure> {
         .skip(1)
         .map(|arg| arg.into_string().map_err(|_| usage()))
         .collect::<Result<_, _>>()?;
-    let runtime = if args.first().is_some_and(|arg| arg == "--runtime-dir") {
+    let mut runtime = env::var_os("LATCHRUN_RUNTIME_DIR").map(PathBuf::from);
+    let mut data = env::var_os("LATCHRUN_DATA_DIR").map(PathBuf::from);
+    while args
+        .first()
+        .is_some_and(|arg| matches!(arg.as_str(), "--runtime-dir" | "--data-dir"))
+    {
         if args.len() < 2 {
             return Err(usage());
         }
-        let path = PathBuf::from(args.remove(1));
-        args.remove(0);
-        path
-    } else {
-        env::var_os("LATCHRUN_RUNTIME_DIR").map_or_else(
-            || PathBuf::from(format!("/tmp/latchrun-{}", nix::unistd::getuid())),
-            PathBuf::from,
-        )
-    };
-    dispatch_cli(&runtime, &args)
+        let flag = args.remove(0);
+        let path = PathBuf::from(args.remove(0));
+        if flag == "--runtime-dir" {
+            runtime = Some(path);
+        } else {
+            data = Some(path);
+        }
+    }
+    let data = data.map_or_else(|| runtime.clone().map_or_else(default_data_dir, Ok), Ok)?;
+    if !data.is_absolute() {
+        return Err(usage());
+    }
+    let runtime = runtime
+        .unwrap_or_else(|| PathBuf::from(format!("/tmp/latchrun-{}", nix::unistd::getuid())));
+    dispatch_cli(&runtime, &data, &args)
 }
 
-fn dispatch_cli(runtime: &Path, args: &[String]) -> Result<i32, Failure> {
+fn default_data_dir() -> Result<PathBuf, Failure> {
+    if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err(usage());
+        }
+        return Ok(path.join("latchrun"));
+    }
+    let user = nix::unistd::User::from_uid(nix::unistd::getuid())
+        .map_err(|_| unavailable())?
+        .ok_or_else(unavailable)?;
+    Ok(user.dir.join(".config/latchrun"))
+}
+
+fn dispatch_cli(runtime: &Path, data: &Path, args: &[String]) -> Result<i32, Failure> {
+    if let Some(result) = statistics_cli(runtime, data, args) {
+        return result;
+    }
     match args
         .iter()
         .map(String::as_str)
@@ -60,11 +87,11 @@ fn dispatch_cli(runtime: &Path, args: &[String]) -> Result<i32, Failure> {
         }
         ["service", "serve"] => {
             prepare_runtime(runtime)?;
-            crate::service::serve(runtime)?;
+            crate::service::serve(runtime, data)?;
             Ok(0)
         }
         ["service", "start"] => {
-            start_service(runtime)?;
+            start_service(runtime, data)?;
             Ok(0)
         }
         ["service", "status"] => show(runtime, &Request::Ping {}),
@@ -93,12 +120,6 @@ fn dispatch_cli(runtime: &Path, args: &[String]) -> Result<i32, Failure> {
             &Request::Resume {
                 session: (*session).into(),
                 profile: load_profile(Path::new(path))?,
-            },
-        ),
-        ["history", "prune", "--keep", keep] => show(
-            runtime,
-            &Request::Prune {
-                keep: keep.parse().map_err(|_| usage())?,
             },
         ),
         ["session", "status"] => show(runtime, &Request::Status { session: None }),
@@ -142,6 +163,63 @@ fn dispatch_cli(runtime: &Path, args: &[String]) -> Result<i32, Failure> {
         ["run", session, rest @ ..] => run(runtime, session, rest),
         _ => Err(usage()),
     }
+}
+
+fn statistics_cli(runtime: &Path, data: &Path, args: &[String]) -> Option<Result<i32, Failure>> {
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    Some(match args.as_slice() {
+        ["history", "prune", "--keep", keep] => keep
+            .parse()
+            .map_err(|_| usage())
+            .and_then(|keep| show(runtime, &Request::Prune { keep })),
+        ["stats"] => show(runtime, &Request::Analytics { days: 7 }),
+        ["stats", "--days", days] => days
+            .parse()
+            .map_err(|_| usage())
+            .and_then(|days| show(runtime, &Request::Analytics { days })),
+        ["data", "path"] => {
+            println!(
+                "{}",
+                serde_json::json!({"directory":data,"database":data.join("analytics.sqlite3")})
+            );
+            Ok(0)
+        }
+        [
+            "activity",
+            "record",
+            "--id",
+            id,
+            "--agent",
+            agent,
+            "--tool",
+            tool,
+            "--duration-ms",
+            duration,
+            "--outcome",
+            outcome,
+        ] => duration
+            .parse()
+            .map_err(|_| usage())
+            .and_then(|duration_ms| {
+                let success = match *outcome {
+                    "success" => true,
+                    "error" => false,
+                    _ => return Err(usage()),
+                };
+                show(
+                    runtime,
+                    &Request::Activity {
+                        id: (*id).into(),
+                        agent: (*agent).into(),
+                        tool: (*tool).into(),
+                        duration_ms,
+                        success,
+                        source: "external".into(),
+                    },
+                )
+            }),
+        _ => return None,
+    })
 }
 
 fn start_session(runtime: &Path, name: &str, path: &str) -> Result<i32, Failure> {
@@ -225,7 +303,7 @@ fn show(runtime: &Path, query: &Request) -> Result<i32, Failure> {
     }
 }
 
-fn start_service(runtime: &Path) -> Result<(), Failure> {
+fn start_service(runtime: &Path, data: &Path) -> Result<(), Failure> {
     prepare_runtime(runtime)?;
     if matches!(request(runtime, &Request::Ping {}), Ok(Response::Ok { .. })) {
         show(runtime, &Request::Ping {})?;
@@ -235,6 +313,8 @@ fn start_service(runtime: &Path) -> Result<(), Failure> {
         .args([
             "--runtime-dir",
             runtime.to_str().ok_or_else(usage)?,
+            "--data-dir",
+            data.to_str().ok_or_else(usage)?,
             "service",
             "serve",
         ])
@@ -298,6 +378,7 @@ fn run(runtime: &Path, session: &str, arguments: &[&str]) -> Result<i32, Failure
             operation: operation.clone(),
             argv: argv.iter().map(|s| (*s).into()).collect(),
             input,
+            origin: Origin::Cli,
         },
         Some(["--shell", script]) => Request::Shell {
             session: session.into(),
@@ -428,7 +509,7 @@ fn receive_output(reader: &mut BufReader<UnixStream>) -> Result<i32, Failure> {
 fn print_help() {
     println!(
         "Latchrun — scoped credentials and persistent local work sessions.\n\n\
-Usage: latchrun [--runtime-dir PATH] COMMAND\n\n\
+Usage: latchrun [--runtime-dir PATH] [--data-dir PATH] COMMAND\n\n\
   service start | serve | status | stop\n\
   session start NAME --profile FILE\n\
   session status [SESSION] | reconnect SESSION | stop SESSION\n\
@@ -438,6 +519,8 @@ Usage: latchrun [--runtime-dir PATH] COMMAND\n\n\
   dashboard serve [--port PORT]\n\
   agent serve\n\
   history prune --keep COUNT\n\
+  stats [--days 1|7|30|90] | data path\n\
+  activity record --id ID --agent NAME --tool NAME --duration-ms N --outcome success|error\n\
   inspect SESSION\n\
   events [SESSION]\n\
   --help | --version\n\n\

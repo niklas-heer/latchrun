@@ -205,6 +205,7 @@ fn dashboard_authenticates_metadata_and_never_exposes_credential_values() {
         "/api/status",
         "/api/events",
         "/api/inspect?session=dashboard-test",
+        "/api/analytics?days=7",
     ] {
         let rejected = dashboard.get(path, false);
         status(&rejected, 401);
@@ -240,6 +241,55 @@ fn dashboard_authenticates_metadata_and_never_exposes_credential_values() {
         &dashboard.get(&format!("/api/status?token={}", dashboard.token), false),
         401,
     );
+}
+
+#[test]
+fn dashboard_analytics_authenticates_history_and_validates_time_ranges() {
+    let dashboard = Dashboard::start();
+    dashboard.session();
+    for days in ["1", "7", "30", "90"] {
+        let path = format!("/api/analytics?days={days}");
+        status(&dashboard.get(&path, false), 401);
+        let response = dashboard.get(&path, true);
+        status(&response, 200);
+        let data = json_body(&response);
+        assert_eq!(data["days"], days.parse::<u16>().unwrap());
+        assert_eq!(data["totals"]["accepted"], 1);
+        assert_eq!(data["totals"]["succeeded"], 1);
+        assert_eq!(data["latency"]["samples"], 1);
+        assert!(data["timeline"].is_array());
+        assert!(data["agents"].is_array());
+        assert!(!response.contains("latchrun-fake-dashboard"));
+        assert!(!response.contains("fake://dashboard"));
+        assert!(!response.contains("dashboard security fixture"));
+    }
+    for days in [
+        "",
+        "0",
+        "2",
+        "365",
+        "07",
+        "-1",
+        "1.0",
+        "7&days=30",
+        "7&token=ignored",
+        "%37",
+    ] {
+        status(
+            &dashboard.get(&format!("/api/analytics?days={days}"), true),
+            400,
+        );
+    }
+    status(&dashboard.get("/api/analytics", true), 404);
+    assert!(
+        dashboard
+            .cli(&["history", "prune", "--keep", "0"])
+            .status
+            .success()
+    );
+    let retained = dashboard.get("/api/analytics?days=7", true);
+    status(&retained, 200);
+    assert_eq!(json_body(&retained)["totals"]["succeeded"], 1);
 }
 
 #[test]

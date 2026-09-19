@@ -269,6 +269,16 @@ impl Dashboard {
             ("GET", "/api/events") => {
                 service_request(&self.runtime, &Request::Events { session: None })?
             }
+            ("GET", target) if target.starts_with("/api/analytics?days=") => {
+                let days = match target.strip_prefix("/api/analytics?days=") {
+                    Some("1") => 1,
+                    Some("7") => 7,
+                    Some("30") => 30,
+                    Some("90") => 90,
+                    _ => return Ok(HttpResponse::error(400)),
+                };
+                service_request(&self.runtime, &Request::Analytics { days })?
+            }
             ("GET", target) if target.starts_with("/api/inspect?session=") => {
                 let session = target.trim_start_matches("/api/inspect?session=");
                 validate_id(session)?;

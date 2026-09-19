@@ -1,18 +1,23 @@
 //! MCP 2025-11-25 stdio adapter. Only pre-authorized sessions can execute.
 use crate::{
     client,
-    protocol::{Failure, InputMode, Request, Response, read_frame, validate_id, write_frame},
+    protocol::{
+        Failure, InputMode, Origin, Request, Response, random_id, read_frame, validate_id,
+        write_frame,
+    },
 };
 use serde_json::{Value, json};
 use std::{
     io::{self, BufReader},
     path::Path,
+    time::Instant,
 };
 
 pub fn serve(runtime: &Path) -> Result<(), Failure> {
     let mut input = BufReader::new(io::stdin());
     let mut output = io::stdout();
     let mut initialized = false;
+    let mut agent = String::from("mcp");
     loop {
         let request: Value = match read_frame(&mut input) {
             Ok(value) => value,
@@ -49,15 +54,23 @@ pub fn serve(runtime: &Path) -> Result<(), Failure> {
             match method {
                 "initialize" => {
                     initialized = true;
+                    request
+                        .pointer("/params/clientInfo/name")
+                        .and_then(Value::as_str)
+                        .filter(|name| validate_id(name).is_ok())
+                        .unwrap_or("mcp")
+                        .clone_into(&mut agent);
                     Ok(
                         json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"latchrun","version":env!("CARGO_PKG_VERSION")},"instructions":"Execute only within operator-created sessions. Supply a unique operation ID. Never replay a lost response; inspect status. Tools return redacted output and no credentials."}),
                     )
                 }
                 "ping" => Ok(json!({})),
                 "tools/list" if initialized => Ok(json!({"tools":tools()})),
-                "tools/call" if initialized => {
-                    Ok(call(runtime, request.get("params").unwrap_or(&Value::Null)))
-                }
+                "tools/call" if initialized => Ok(call(
+                    runtime,
+                    &agent,
+                    request.get("params").unwrap_or(&Value::Null),
+                )),
                 "tools/list" | "tools/call" => {
                     Err((-32000, "Initialize the MCP connection first."))
                 }
@@ -108,16 +121,73 @@ fn tools() -> Vec<Value> {
         tools.push(json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":{"session":{"type":"string"}},"required":if required{vec!["session"]}else{vec![]},"additionalProperties":false},"annotations":{"readOnlyHint":matches!(name,"latchrun_status"|"latchrun_events"|"latchrun_inspect"),"openWorldHint":false}}));
     }
     tools.push(json!({"name":"latchrun_run","description":"Run one exact approved command in an existing session. Operation IDs are durable and never replayed. stdin is null; output is redacted and bounded.","inputSchema":{"type":"object","properties":{"session":{"type":"string"},"operation":{"type":"string"},"argv":{"type":"array","items":{"type":"string"},"minItems":1}},"required":["session","operation","argv"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}));
+    tools.push(json!({"name":"latchrun_analytics","description":"Inspect durable aggregate usage for the selected number of days. No commands, output or credentials are included.","inputSchema":{"type":"object","properties":{"days":{"type":"integer","enum":[1,7,30,90],"default":7}},"additionalProperties":false},"annotations":{"readOnlyHint":true,"openWorldHint":false}}));
     tools
 }
 
-fn call(runtime: &Path, params: &Value) -> Value {
+fn call(runtime: &Path, agent: &str, params: &Value) -> Value {
+    let started = Instant::now();
     let result = invoke(runtime, params);
-    match result {
+    let telemetry_failed = params
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| advertised_tool(name))
+        .is_some_and(|tool| {
+            let success = result.as_ref().is_ok_and(|value| {
+                value
+                    .get("exit_code")
+                    .is_none_or(|code| code.as_i64() == Some(0))
+            });
+            record_activity(runtime, agent, tool, started, success).is_err()
+        });
+    let mut response = match result {
         Ok(value) => {
             json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":false})
         }
         Err(error) => json!({"content":[{"type":"text","text":error.to_string()}],"isError":true}),
+    };
+    if telemetry_failed {
+        const WARNING: &str = "Usage recording was unavailable. The tool outcome above is unchanged; do not repeat a command to recover telemetry.";
+        response["_meta"] = json!({"telemetry_warning": WARNING});
+        if let Some(content) = response["content"].as_array_mut() {
+            content.push(json!({"type":"text","text":WARNING}));
+        }
+    }
+    response
+}
+
+fn advertised_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "latchrun_status"
+            | "latchrun_events"
+            | "latchrun_inspect"
+            | "latchrun_stop"
+            | "latchrun_refresh"
+            | "latchrun_run"
+            | "latchrun_analytics"
+    )
+}
+
+fn record_activity(
+    runtime: &Path,
+    agent: &str,
+    tool: &str,
+    started: Instant,
+    success: bool,
+) -> Result<(), Failure> {
+    let query = Request::Activity {
+        id: random_id()?,
+        agent: agent.into(),
+        tool: tool.into(),
+        duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        success,
+        source: "mcp".into(),
+    };
+    match client::request(runtime, &query)? {
+        Response::Ok { .. } => Ok(()),
+        Response::Error { code, message } => Err(Failure { code, message }),
+        _ => Err(invalid()),
     }
 }
 fn invalid() -> Failure {
@@ -142,15 +212,28 @@ fn invoke(runtime: &Path, params: &Value) -> Result<Value, Failure> {
     if let Some(id) = session {
         validate_id(id)?;
     }
-    let allowed = if name == "latchrun_run" {
-        &["session", "operation", "argv"][..]
-    } else {
-        &["session"][..]
+    let allowed = match name {
+        "latchrun_run" => &["session", "operation", "argv"][..],
+        "latchrun_analytics" => &["days"][..],
+        _ => &["session"][..],
     };
     if arguments.keys().any(|key| !allowed.contains(&key.as_str())) {
         return Err(invalid());
     }
     let query = match name {
+        "latchrun_analytics" => {
+            let days = arguments
+                .get("days")
+                .map(|value| value.as_u64().ok_or_else(invalid))
+                .transpose()?
+                .unwrap_or(7);
+            if !matches!(days, 1 | 7 | 30 | 90) {
+                return Err(invalid());
+            }
+            Request::Analytics {
+                days: u16::try_from(days).map_err(|_| invalid())?,
+            }
+        }
         "latchrun_status" => Request::Status {
             session: session.map(str::to_owned),
         },
@@ -186,6 +269,7 @@ fn invoke(runtime: &Path, params: &Value) -> Result<Value, Failure> {
                     operation: operation.into(),
                     argv,
                     input: InputMode::Null,
+                    origin: Origin::Mcp,
                 },
             );
         }

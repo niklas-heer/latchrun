@@ -1,4 +1,5 @@
 mod agent;
+mod analytics;
 mod client;
 mod dashboard;
 mod execution;

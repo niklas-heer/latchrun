@@ -22,12 +22,14 @@ and terminates active commands. Both actions require an explicit browser
 confirmation. Neither action recalls a credential already delivered to a child
 or revokes a credential at its remote provider.
 
+The usage-history section provides 24-hour and 7/30/90-calendar-day views, outcome trends, p50/p95/p99 command latency, credential-cache hit rates, and agent/tool activity. Charts have legends and an expandable exact-data table. UTC periods include the current partial period; exact boundaries are shown. These statistics persist in SQLite independently of session-history pruning. Agent rows distinguish adapter-observed MCP calls from explicitly reported external activity; neither implies visibility into every tool on the machine. See [analytics storage and definitions](analytics.md).
+
 The environment inspector shows declared names, sources, presence rules,
 precedence and expiry. It does not resolve credentials. Only values explicitly
 classified for exposure by the service's environment policy are visible; secret
 values and provider references are unavailable. Command arguments, project paths,
 purpose, raw output and full profiles are also unavailable through the dashboard.
-Activity is limited to mediated operations and the service's bounded history.
+The session access timeline uses the service's bounded history; usage analytics retains its separate local metadata.
 
 ## Browser authorization
 
@@ -68,6 +70,7 @@ Browser callers must use the exact same origin. No route accepts a raw secret.
 | GET | `/` | Public UI shell without service metadata |
 | GET | `/api/status` | Service statistics and session/operation metadata |
 | GET | `/api/events` | Bounded service activity metadata |
+| GET | `/api/analytics?days=7` | Durable usage analytics; days must be 1, 7, 30 or 90 |
 | GET | `/api/inspect?session=ID` | Secret-safe environment and session metadata |
 | POST | `/api/session/refresh` | Invalidate cached credentials for the session |
 | POST | `/api/session/stop` | Stop the session and active commands |

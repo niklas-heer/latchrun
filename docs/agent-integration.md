@@ -47,6 +47,7 @@ The adapter advertises JSON schemas through the MCP [tools interface](https://mo
 | `latchrun_stop` | Required `session` | Stop the session and active commands |
 | `latchrun_refresh` | Required `session` | Invalidate cached credentials for future commands |
 | `latchrun_run` | Required `session`, `operation`, `argv` | Execute one exact approved command with null stdin |
+| `latchrun_analytics` | Optional `days`: 1, 7, 30 or 90; default 7 | Durable aggregate usage and agent/tool activity |
 
 A fake run request after initialization looks like this:
 
@@ -55,6 +56,8 @@ A fake run request after initialization looks like this:
 ```
 
 The tool result supplies both text content and `structuredContent` containing `operation`, `exit_code`, `stdout`, `stderr` and `truncated`. Output has already passed through secret redaction. Each stream retains at most 32 KiB for the response; excess bytes are drained and discarded. Binary output is converted with UTF-8 replacement. A command's nonzero exit appears in `exit_code`; tool/protocol/provider failures set `isError: true` instead.
+
+Each advertised tool call records safe usage metadata after completion. A valid `clientInfo.name` supplied at initialization identifies the client in analytics; otherwise its label is `mcp`. Labels follow the same bounded identifier syntax and do not authenticate the client. Names are fixed advertised labels; arguments/results are never recorded. Nonzero command exits count as failed calls. If recording fails, the original outcome is preserved and a fixed warning appears in text content and `_meta.telemetry_warning`; do not repeat the command to recover telemetry. Unknown tool names are not recorded. See [analytics and external reports](analytics.md).
 
 There is no live output streaming, stdin, resize or TTY tool. Use the CLI's `--stdin`/`--tty` modes for interactive commands. The adapter has no `--shell` convenience tool; an approved shell can only be invoked through the same exact argv rule as another command.
 

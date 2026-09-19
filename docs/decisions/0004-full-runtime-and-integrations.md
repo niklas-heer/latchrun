@@ -3,6 +3,7 @@
 Date: 2026-09-19
 Status: Accepted under the owner's delegated full-implementation task; implemented
 Supersedes in part: [0003: Session and execution contract](0003-session-and-execution-contract.md)
+Extended by: [0005: Durable usage analytics](0005-durable-usage-analytics.md), which adds SQLite and reported agent activity.
 
 ## Context and acceptance
 

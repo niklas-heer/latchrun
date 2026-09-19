@@ -4,7 +4,7 @@ Scoped credentials. Persistent sessions. Controlled execution.
 
 Latchrun is a local Rust service for running approved commands with scoped credentials on macOS and Linux. It provides reusable sessions, crash recovery without command replay, redacted output, interactive terminals, an authenticated dashboard, a stdio agent adapter, and optional OS filesystem/network enforcement.
 
-**Status: full implementation of the current [build brief](BUILD_BRIEF.md).** The OS user and profile authors remain trusted. A command receiving a credential can disclose it; optional sandboxing restricts that command's filesystem and network access, not every process running as the same user. See the [accepted implementation decision](docs/decisions/0004-full-runtime-and-integrations.md).
+**Status: full implementation of the current [build brief](BUILD_BRIEF.md).** The OS user and profile authors remain trusted. A command receiving a credential can disclose it; optional sandboxing restricts that command's filesystem and network access, not every process running as the same user. See the [accepted implementation decision](docs/decisions/0004-full-runtime-and-integrations.md) and [durable analytics extension](docs/decisions/0005-durable-usage-analytics.md).
 
 ## Try it without a vault
 
@@ -23,7 +23,7 @@ Build with `mise run build`, then run these from the checkout:
 
 The child receives the public fake credential `latchrun-fake-demo`; its output is `[REDACTED]`. Address a session by name or its returned random ID. Every deliberate execution needs a new operation ID: reusing `demo-1` is rejected, including after service restart. Omitting `--operation` generates an ID and prints it on stderr before submission. The commands below assume `latchrun` is on PATH; otherwise use `./target/release/latchrun`.
 
-`service start` starts a background service; `service serve` runs it in the foreground. `service status` reports health and counts. The default runtime is `/tmp/latchrun-<uid>`; select another with `--runtime-dir PATH` before the command, or `LATCHRUN_RUNTIME_DIR`. Use an absolute path no longer than 80 bytes whose parent exists. An existing runtime directory must be owned by you, mode `0700`, and not a symlink. The socket and metadata journal are owner-only. The runtime contains the lock, socket, `history.json`, and transient journal files during atomic writes. Keep it between restarts to retain operation-ID protection; `/tmp` can be cleared by the OS.
+`service start` starts a background service; `service serve` runs it in the foreground. `service status` reports health and counts. The default runtime is `/tmp/latchrun-<uid>`; select another with `--runtime-dir PATH` before the command, or `LATCHRUN_RUNTIME_DIR`. Use an absolute path no longer than 80 bytes whose parent exists. An existing runtime directory must be owned by you, mode `0700`, and not a symlink. The socket and metadata journal are owner-only. The runtime contains the lock, socket, `history.json`, and transient journal files during atomic writes. Durable usage analytics live separately in `analytics.sqlite3`; see [data paths and retention](docs/analytics.md#storage-and-lifecycle). Keep it between restarts to retain operation-ID protection; `/tmp` can be cleared by the OS.
 
 ## Profiles and exact command policy
 
@@ -87,7 +87,7 @@ Exact known secret values are redacted across read boundaries, including termina
 
 Set `sandbox.enabled` to opt into OS enforcement. The project is readable by default; declare writable directories, additional readable installations and protected paths. Network defaults to deny, including host loopback and filesystem Unix sockets. `network: "allow"` grants general network access, not a host allowlist. A missing or incompatible backend fails closed.
 
-macOS uses Apple's deprecated `/usr/bin/sandbox-exec`; Linux uses `/usr/bin/bwrap`, namespaces and a network-denial seccomp filter. Platform behavior and host requirements differ. Read [the sandbox guide](docs/sandbox.md) before adapting [examples/fake-sandbox.json](examples/fake-sandbox.json). Runtime control files and file-provider credential files are automatically protected. Providers run outside the command sandbox. Same-user processes outside it, readable hardlink aliases/copies, and remote credential authority remain outside its protection.
+macOS uses Apple's deprecated `/usr/bin/sandbox-exec`; Linux uses `/usr/bin/bwrap`, namespaces and a network-denial seccomp filter. Platform behavior and host requirements differ. Read [the sandbox guide](docs/sandbox.md) before adapting [examples/fake-sandbox.json](examples/fake-sandbox.json). Runtime control files, the analytics data directory and file-provider credential files are automatically protected. Providers run outside the command sandbox. Same-user processes outside it, readable hardlink aliases/copies, and remote credential authority remain outside its protection.
 
 - **Git SSH:** adapt [examples/git-ssh.json](examples/git-ssh.json) with the project, executable, repository and existing [1Password SSH-agent socket](https://www.1password.dev/ssh/agent). Latchrun supplies the socket without extracting private keys. The child can use the identities that agent permits; this is not a per-key capability. A sandboxed SSH workflow needs network allow.
 - **Git HTTPS:** adapt [examples/git-https.json](examples/git-https.json). `git_https` selects an exact HTTPS host, username and declared `token_env`. A built-in helper supplies the token over Git's private credential pipe; it resets inherited helpers, disables interactive Git prompts, and performs no credential-store writes. Matching is host-scoped, not repository-scoped. The token must be a nonempty UTF-8 single line. `GIT_*` profile variables are disallowed with this integration. Git hooks/configuration remain trusted.
@@ -113,13 +113,21 @@ Limits are 128 retained sessions, 1024 operation details, 65536 reserved operati
 
 Independent guardians observe service control-pipe closure and clean up ordinary descendants, including terminal job groups. Killing a guardian itself can orphan its command and remove deadline enforcement. A hostile unsandboxed child can escape process groups/sessions; process cleanup is not a sandbox. Such uncertain outcomes require explicit reconciliation and possibly OS cleanup.
 
-`inspect` reports environment declarations, provenance, expiry and explicitly exposed non-secret values without fetching credentials. Status/events omit project paths, purpose, commands, arguments, references and output. Names and IDs are visible metadata. Statistics cover commands mediated by Latchrun, not whole-agent activity.
+`inspect` reports environment declarations, provenance, expiry and explicitly exposed non-secret values without fetching credentials. Status/events omit project paths, purpose, commands, arguments, references and output. Names and IDs are visible metadata. Durable analytics cover mediated commands, automatically observed MCP calls and explicitly reported external tool activity. They do not automatically observe all tools on the machine.
+
+## Durable analytics
+
+`latchrun stats [--days 1|7|30|90]` reports command outcomes, latency percentiles, cache hit rates, time buckets and agent/tool usage. The default window is seven days. Analytics survive service restart and `history prune` in a private SQLite database; no command arguments, output, credentials or references are recorded. `latchrun data path` shows its location.
+
+The default data directory is `$XDG_CONFIG_HOME/latchrun` or the OS account's `~/.config/latchrun`. Use `--data-dir PATH` or `LATCHRUN_DATA_DIR` to override it. An explicit runtime also becomes the data directory unless overridden, keeping test/custom runtimes isolated. Rows are retained indefinitely; historical activity absent from the journal cannot be reconstructed. Each data directory permits one active daemon; concurrent services need separate data directories. Stop/restart older daemons to enable the new analytics protocol; `service start` does not replace an already running daemon. See [upgrade and recovery details](docs/analytics.md#upgrading-a-running-service).
+
+The MCP adapter records advertised tool calls automatically. Other integrations can report non-sensitive metadata through `activity record --id ID --agent NAME --tool NAME --duration-ms N --outcome success|error`. Identical reports deduplicate; changed payloads under an existing ID fail. External reports are self-reported, not independently observed behavior. See [analytics definitions, storage and reporting](docs/analytics.md).
 
 ## Dashboard and agent integration
 
 Run `latchrun dashboard serve` and open the private startup URL. The loopback-only dashboard shows sessions, outcomes, events and environment provenance, with authenticated stop/refresh controls. Its ephemeral URL capability authorizes those controls; do not share it or expose the listener through a proxy. See [dashboard usage and browser authorization](docs/dashboard.md).
 
-Run `latchrun agent serve` as a stdio MCP server for an agent. It implements MCP 2025-11-25 tools for status, events, inspection, stop, refresh and exact execution in operator-created sessions. It does not create profiles/sessions, expose credentials, or support interactive input. See [agent setup and retry rules](docs/agent-integration.md).
+Run `latchrun agent serve` as a stdio MCP server for an agent. It implements MCP 2025-11-25 tools for status, events, inspection, analytics, stop, refresh and exact execution in operator-created sessions. It does not create profiles/sessions, expose credentials, or support interactive input. See [agent setup and retry rules](docs/agent-integration.md).
 
 The private socket and dashboard capability protect against other ordinary users or unauthorized browser origins. Neither isolates hostile processes running as the service user. There is no remote service, automatic command replay, automatic startup at login, or whole-machine confinement of the calling agent.
 
@@ -135,7 +143,7 @@ mise run build
 ./target/release/latchrun --help
 ```
 
-Stable Rust 1.97.1, rustfmt, Clippy, Rust Analyzer and rust-src are pinned; Cargo.lock is tracked. Production code forbids unsafe Rust. Serde handles typed bounded IPC, nix handles safe Unix interfaces, signal-hook forwards signals, and portable-pty/terminal_size support terminals. Use `mise run fmt` to format and `mise run test` for fake-only CLI, lifecycle, recovery, provider, terminal, dashboard, agent and sandbox tests. Native sandbox tests need a functioning OS backend; install bubblewrap on Linux.
+Stable Rust 1.97.1, rustfmt, Clippy, Rust Analyzer and rust-src are pinned; Cargo.lock is tracked. Production code forbids unsafe Rust. Serde handles typed bounded IPC, nix handles safe Unix interfaces, signal-hook forwards signals, portable-pty/terminal_size support terminals, and rusqlite with bundled SQLite stores durable usage metadata. Use `mise run fmt` to format and `mise run test` for fake-only CLI, lifecycle, recovery, provider, terminal, dashboard, agent and sandbox tests. Native sandbox tests need a functioning OS backend; install bubblewrap on Linux.
 
 `mise run ci` runs Linux checks through Dagger 0.21.9 and its Dang SDK. Start a compatible container engine first; Colima with Docker is supported on macOS. The Linux check installs bubblewrap and enables container root capabilities for nested sandbox tests: use a trusted checkout and disposable engine/VM. This CI capability is not required by the normal service. See [sandbox test requirements](docs/sandbox.md#boundaries-and-tests).
 
