@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
 description = "Local command sessions with scoped credential access"
+license = "MIT"
+repository = "https://github.com/niklas-heer/latchrun"
 publish = false
 
 [profile.release]

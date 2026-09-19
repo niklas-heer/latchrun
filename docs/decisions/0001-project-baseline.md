@@ -3,6 +3,8 @@
 Date: 2026-09-19
 Status: Accepted
 
+Visibility and licensing are superseded by [0002: Public repository and MIT license](0002-publication-and-license.md). The rest of this baseline remains in effect.
+
 ## Context and decision
 
 The owner selected **Latchrun** and requested a new repository, setup, and a build brief before implementation in a later session. Create a private repository under niklas-heer with main as its default branch. Use stable Rust and a dependency-free CLI scaffold.

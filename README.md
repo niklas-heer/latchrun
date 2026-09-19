@@ -34,4 +34,6 @@ Keep Rust pins aligned in Cargo.toml, rust-toolchain.toml, and mise.toml. Keep t
 
 Read [AGENTS.md](AGENTS.md). Use fake credentials for tests; never put real secrets in arguments, fixtures, output, or tracked files. Disposable experiments belong in ignored `scratch/`.
 
-No public license has been selected.
+## License
+
+Licensed under the [MIT License](LICENSE). See the [publication review](docs/publication-review.md) for the initial content inventory and the [publication decision](docs/decisions/0002-publication-and-license.md) for the rationale.
