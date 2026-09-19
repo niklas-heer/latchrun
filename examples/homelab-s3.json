@@ -1,0 +1,13 @@
+{
+  "project": "/absolute/path/to/project",
+  "purpose": "List a homelab backup bucket with a read-only service account",
+  "ttl_seconds": 900,
+  "timeout_seconds": 120,
+  "provider": "one_password",
+  "op_path": "/usr/local/bin/op",
+  "credentials": {
+    "AWS_ACCESS_KEY_ID": "op://Homelab/Read-only backup/access key",
+    "AWS_SECRET_ACCESS_KEY": "op://Homelab/Read-only backup/secret key"
+  },
+  "commands": [{"executable": "/usr/local/bin/aws", "args": ["--endpoint-url", "https://storage.example.invalid", "s3", "ls", "s3://backups"]}]
+}

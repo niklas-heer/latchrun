@@ -1,14 +1,16 @@
 # What we want to build
 
-Created 2026-09-19. This is the handoff for the next development session.
+Created and updated 2026-09-19. This is the product brief and implementation handoff.
 
 ## Intent and current state
 
 Build **Latchrun**, a focused local intermediary between a person or AI agent and commands requiring credentials. Reuse access throughout a work session, recover connections predictably, and make activity inspectable without exposing secrets.
 
-The owner accepted the project name, Rust direction, and creation of a separate repository. This document preserves the intended product and recommended implementation sequence. Detailed protocols, cache policy, sandbox backend, and UI choices remain proposals.
+The owner accepted the project name, Rust direction, and creation of a separate repository, then delegated a full implementation. This document preserves the product scope and implementation sequence. [0003: Session and execution contract](docs/decisions/0003-session-and-execution-contract.md) records implemented protocols and cache policy. The sandbox backend and UI remain future decisions.
 
-Current implementation: help/version CLI scaffold, pinned tooling, and Linux/macOS CI. No credential access or background service exists yet.
+Current implementation: a local per-user Unix service, immutable named sessions, fake and 1Password CLI providers, explicit SSH-agent mediation, exact-command execution policy, guardian-based process cleanup, signal forwarding, redacted streaming output, expiry, reconnect/status inspection, bounded metadata events/statistics, and duplicate-operation protection. Runtime state is in memory; secrets are resolved per command without cross-command caching. See [README.md](README.md) for commands, profiles, and the explicit same-user/approved-child trust boundary.
+
+The first usable CLI/service scope is implemented. Automated acceptance uses fake credentials and provider fixtures, not live vaults or private infrastructure. Interactive stdin/TTY, persistent recovery journals, HTTPS Git authentication helpers, a dashboard, and OS-enforced filesystem/network restrictions are not implemented. Git SSH and read-only homelab S3 profiles are documented recipes; authorized live end-to-end validation remains outstanding.
 
 ## User workflows
 
@@ -56,6 +58,8 @@ Current implementation: help/version CLI scaffold, pinned tooling, and Linux/mac
 
 ### 1. Establish the contract with a fake provider
 
+Implemented and covered by the ADR, public CLI tests, and redaction tests. The original acceptance criteria follow.
+
 Write an ADR defining session identity, trusted callers, credential scope, expiry, and crash semantics. Design a small provider interface and CLI/IPC error contract. Keep actual command syntax provisional until this contract is reviewed in implementation.
 
 Deliver a vertical slice: start a fake session, invoke a harmless child with a fake credential, inspect safe metadata, and stop. No real vault required.
@@ -69,24 +73,29 @@ Acceptance evidence:
 
 ### 2. Prove lifecycle and recovery
 
+Implemented with bounded operation identity/history, private/stale socket handling, guardian cleanup, fake CLI fault tests, and deterministic production-state tests. Service restart deliberately loses history and reports unknown previous sessions. Reconnect never replays work or old output.
+
 Cover reconnect, concurrent callers, expiry, stale sockets, service crash, child crash, and lost responses. Model time and faults deterministically where useful; retain failing seeds/traces. Establish outcome-unknown behavior and ensure mutating commands are never blindly replayed.
 
 ### 3. Add 1Password and one real workflow
+
+Provider adapter and Git SSH/homelab S3 recipes implemented. Fixture tests verify official CLI argument shape, sanitized environment, successful injection, redaction, and suppressed provider diagnostics. No live credential/network workflow was executed; its acceptance evidence requires a separately authorized target.
 
 Use official provider integration; prefer SSH-agent mediation for Git over SSH. Resolve only declared references. Reauthentication failures must explain the required user action without dumping provider output or credentials. Validate one authorized Git workflow and one narrowly scoped homelab workflow.
 
 ### 4. Add policy and observability
 
+Exact command/argument rules, bounded metadata retention, provenance inspection, status/duration, and service statistics are implemented. Protected-path enforcement, OS sandboxing, and the authenticated dashboard remain later work, as scoped above.
+
 Implement explainable deterministic rules, protected paths, retention controls, and statistics. Evaluate platform-specific sandboxing with explicit bypass and limitation tests. Build the local dashboard after the event schema and access boundary stabilize.
 
-## Open decisions for the next session
+## Resolved choices and next acceptance work
 
-- Is the initial threat model accidental agent mistakes, untrusted child code, or both? Enforcement and credential delivery differ substantially.
-- What identifies a session and authorizes a caller? What can an agent alter in project policy?
-- What is the default cached-secret TTL, and what happens when 1Password locks or a key rotates?
-- Should the service persist safe session metadata across restart, or initially keep all session state in memory?
-- Which exact Git and homelab commands form the first supported workflows?
-- Which macOS/Linux restrictions are realistic for the first usable release?
+The initial model reduces accidental disclosure and command-selection mistakes; it trusts same-user callers and approved children. Session identity is a random ID plus a unique name. A private socket controls other-user access; trusted callers can supply profiles. A profile snapshot fixes a session's policy but is not an authorization boundary against another same-user process.
+
+Cached-secret TTL is zero between commands. The provider authorizes each fetch; locks and rotations affect future fetches according to 1Password's policy, not credentials already delivered. Session and operation history remain in memory. Git uses an explicitly approved SSH-agent socket; the homelab recipe lists an S3 bucket through an environment-aware CLI using remote read-only credentials.
+
+Next acceptance work: choose explicitly authorized real Git and homelab targets, validate official 1Password app integration on each supported OS, and record outcomes without secret output. Any cache, persistent journal, interactive execution, or stronger caller capability scheme needs a new decision. Evaluate enforceable macOS/Linux sandbox mechanisms before presenting protected paths/network policy as a security boundary. Build the authenticated dashboard only after selecting its concrete inspection needs.
 
 ## Performance and scope discipline
 

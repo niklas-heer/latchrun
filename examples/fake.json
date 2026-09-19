@@ -1,0 +1,9 @@
+{
+  "project": "/tmp",
+  "purpose": "Demonstrate fake credential delivery and output redaction",
+  "ttl_seconds": 3600,
+  "timeout_seconds": 30,
+  "provider": "fake",
+  "credentials": {"TEST_SECRET": "fake://demo"},
+  "commands": [{"executable": "/usr/bin/printenv", "args": ["TEST_SECRET"]}]
+}

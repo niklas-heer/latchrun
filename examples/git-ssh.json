@@ -1,0 +1,10 @@
+{
+  "project": "/absolute/path/to/project",
+  "purpose": "Inspect remote Git references using the existing SSH agent",
+  "ttl_seconds": 3600,
+  "timeout_seconds": 120,
+  "provider": "one_password",
+  "ssh_auth_sock": "/absolute/path/to/1password/agent.sock",
+  "credentials": {},
+  "commands": [{"executable": "/usr/bin/git", "args": ["ls-remote", "git@github.com:example/private-repo.git"]}]
+}
