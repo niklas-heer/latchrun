@@ -2,15 +2,13 @@
 
 Scoped credentials. Persistent sessions. Controlled execution.
 
-Latchrun is a local Rust service for running approved commands with scoped credentials, reusable work sessions, and secret-safe activity metadata. It supports macOS and Linux, fake credentials for testing, 1Password CLI references, and an existing SSH agent.
+Latchrun is a local Rust service for running approved commands with scoped credentials on macOS and Linux. It provides reusable sessions, crash recovery without command replay, redacted output, interactive terminals, an authenticated dashboard, a stdio agent adapter, and optional OS filesystem/network enforcement.
 
-**Status: first usable CLI/service implementation.** Sessions, execution, recovery inspection, provider integration, exact command policy, and bounded activity history are implemented. A dashboard and OS sandbox remain future work. The trust boundary is the local user and approved child programs: a child receiving a credential can disclose it, and another process running as the same user can control Latchrun.
-
-See [BUILD_BRIEF.md](BUILD_BRIEF.md) for scope and [the runtime decision](docs/decisions/0003-session-and-execution-contract.md) for the lifecycle and security contract.
+**Status: full implementation of the current [build brief](BUILD_BRIEF.md).** The OS user and profile authors remain trusted. A command receiving a credential can disclose it; optional sandboxing restricts that command's filesystem and network access, not every process running as the same user. See the [accepted implementation decision](docs/decisions/0004-full-runtime-and-integrations.md).
 
 ## Try it without a vault
 
-After building, run these from the checkout:
+Build with `mise run build`, then run these from the checkout:
 
 ```sh
 ./target/release/latchrun service start
@@ -23,13 +21,13 @@ After building, run these from the checkout:
 ./target/release/latchrun service stop
 ```
 
-The command receives a fake credential and prints `[REDACTED]`. A session can be addressed by its name or returned random ID. Names cannot be reused during one service lifetime. Reusing `demo-1` is rejected; each deliberate new execution needs a new operation ID. Omitting `--operation` creates an ID and prints it on stderr before submission.
+The child receives the public fake credential `latchrun-fake-demo`; its output is `[REDACTED]`. Address a session by name or its returned random ID. Every deliberate execution needs a new operation ID: reusing `demo-1` is rejected, including after service restart. Omitting `--operation` generates an ID and prints it on stderr before submission. The commands below assume `latchrun` is on PATH; otherwise use `./target/release/latchrun`.
 
-`service start` starts a background service; `service serve` runs it in the foreground. `service status` reports counts and health. The default runtime is `/tmp/latchrun-<uid>`; use a short absolute path with `--runtime-dir PATH` before the command, or `LATCHRUN_RUNTIME_DIR`. Its parent must exist, and an existing runtime directory must be owned by you with mode `0700`. Socket mode is `0600`. The runtime contains only an empty lock file and a socket.
+`service start` starts a background service; `service serve` runs it in the foreground. `service status` reports health and counts. The default runtime is `/tmp/latchrun-<uid>`; select another with `--runtime-dir PATH` before the command, or `LATCHRUN_RUNTIME_DIR`. Use an absolute path no longer than 80 bytes whose parent exists. An existing runtime directory must be owned by you, mode `0700`, and not a symlink. The socket and metadata journal are owner-only. The runtime contains the lock, socket, `history.json`, and transient journal files during atomic writes. Keep it between restarts to retain operation-ID protection; `/tmp` can be cleared by the OS.
 
-## Profiles and policy
+## Profiles and exact command policy
 
-Profiles are JSON snapshots loaded at session creation. Editing a file does not alter an existing session. Unknown fields are rejected. [examples/fake.json](examples/fake.json) is immediately runnable; the other examples require your executable, project, socket, and reference paths.
+Profiles are JSON snapshots loaded at session creation or explicit resume. Editing the file does not alter an active session. Unknown fields are rejected. [examples/fake.json](examples/fake.json) is immediately runnable:
 
 ```json
 {
@@ -43,36 +41,91 @@ Profiles are JSON snapshots loaded at session creation. Editing a file does not 
 }
 ```
 
-The executable must be an absolute existing executable; its canonical path and **every argument** must match one complete rule. The working directory is fixed to the canonical project directory. There is no implicit shell expansion, prefix matching, arbitrary environment override, or caller-selected working directory. Shells/scripts can be explicitly approved, but their contents, dependencies, hooks, configuration, and filesystem changes remain trusted. Policy does not pin executable contents or restrict what an approved command can do.
+An executable must be an existing absolute executable. Its canonical path and **every argument** must match one complete command rule. The working directory is the canonical project directory. There is no prefix matching, implicit shell evaluation, caller-selected working directory, or ambient environment inheritance. Executable contents, scripts, hooks and configuration are not pinned; approve their behavior as well as their names.
 
-Children start with an empty environment, then receive `PATH=/usr/bin:/bin`, `LANG=C`, declared credential variables, and an optional approved `SSH_AUTH_SOCK`. Parent-shell variables are not inherited. Environment names use uppercase ASCII letters, digits, and underscores; dynamic-loader variables, common shell-control variables, and Latchrun/1Password control variables are rejected. This is not a comprehensive restriction on interpreter configuration variables. Do not put actual secret values in profiles, names, arguments, paths, or operation IDs. The fake provider maps `fake://demo` to the deliberately public value `latchrun-fake-demo`.
+Children receive `PATH=/usr/bin:/bin`, `LANG=C`, the profile's explicit non-secret `environment`, declared credentials, and an optional approved `ssh_auth_sock`. `expose_environment` selects only declared non-secret values to show in inspection and the dashboard; it cannot expose credential values. Environment names use uppercase ASCII letters, digits and underscores. Loader, shell-control and internal control names are reserved, and secret/non-secret declarations cannot overlap. Do not put real secrets in profiles, arguments, names, paths or operation IDs.
 
-Sessions default to one hour; commands default to five minutes, including provider lookup. Both limits accept 1–86400 seconds. Session expiry and stop deny further execution and terminate active process groups. No PTY is allocated: stdin is null and stdout/stderr are pipes; interactive execution is unsupported. stdout and stderr stream separately with exact secret-value redaction, including values split across reads; normal exit codes and `128 + signal` propagate to the caller. INT, TERM, and HUP sent to the CLI are forwarded, with forced cleanup after a short grace period.
+Session TTL defaults to 3600 seconds; operation timeout defaults to 300 seconds and includes credential lookup. Both accept 1–86400 seconds. Stop and expiry deny new execution and terminate active commands. Session refresh clears credentials cached for future runs; it does not extend the session TTL or recall credentials already delivered.
 
-## 1Password and supported workflow recipes
+## Providers and credential lifetime
 
-Set `provider` to `one_password`, `op_path` to the absolute official `op` executable, and credential values to `op://vault/item/field` references. Each operation resolves only its declared references with [`op read --no-newline`](https://www.1password.dev/cli/reference/commands/read). Authentication belongs to the official CLI and desktop app; unlock/sign in there before running. Provider stdout never goes to the caller, provider stderr is discarded, and failure returns a fixed actionable message. Lookup has a 30-second per-reference bound and a 64 KiB total secret limit. Ambient `OP_*` tokens are not inherited. Provider integration is tested with an executable fixture; no live vault has been accessed for automated validation.
+Each profile chooses one provider for its declared credentials:
 
-There is **no secret cache between operations**. Repeated runs reuse session policy and whatever authorization 1Password itself currently allows. Latchrun neither polls to keep authorization alive nor detects a password-manager lock for already running commands. A delivered credential remains in the child until that process ends; stopping Latchrun does not revoke a remote credential.
+| Provider | Reference and configuration | Behavior |
+| --- | --- | --- |
+| `fake` | `fake://demo` | Returns the public test value `latchrun-fake-demo`. |
+| `one_password` | `op://vault/item/field`, explicit absolute `op_path` | Uses official `op read --no-newline`; unlock/sign in through the official CLI/app. |
+| `file` | `file:///absolute/path` | Reads an existing same-user regular file, with no symlink or group/other permissions; preserves all bytes, including a trailing newline. |
+| `password_store` | `pass://entry`, explicit absolute `provider_path` to `pass` | Runs `pass show entry`; uses only the first line and discards notes. Traversal, absolute entries and option-like entries are rejected. |
 
-- **Git over SSH:** adapt [examples/git-ssh.json](examples/git-ssh.json) with your project, Git executable, repository, and [1Password SSH-agent socket](https://www.1password.dev/ssh/agent). Run the exact approved `git ls-remote` command. The existing SSH agent handles keys and prompts; Latchrun never reads the private key. No `op_path` is needed when `credentials` is empty. SSH receives access to that agent's permitted identities, not a key-specific capability. HTTPS authentication requires a separately approved credential-aware helper and is not implemented by this SSH recipe.
-- **Homelab object storage:** adapt [examples/homelab-s3.json](examples/homelab-s3.json) for a read-only S3-compatible account and the AWS CLI. Run its exact `s3 ls` command; the AWS CLI reads the declared access-key environment variables. Grant only the necessary bucket permissions at the remote service. The example uses a fictional endpoint and references. Neither this network workflow nor the Git workflow has been exercised against private infrastructure here.
+The 1Password adapter follows the official [read command](https://www.1password.dev/cli/reference/commands/read). External providers receive a minimal environment with HOME from the OS account; ambient `OP_*` tokens and parent-shell configuration are not inherited. Provider stdout is private and bounded, stderr is discarded, and failures return fixed instructions. Each external reference has a 30-second timeout within the operation deadline. Empty values, NUL bytes and total credentials above 64 KiB are rejected. The file provider reads operator-managed files; Latchrun does not create a credential store.
 
-Install optional workflow tools yourself and use their verified absolute paths. Routine development and tests do not require 1Password, Git credentials, AWS CLI, or network infrastructure.
+`cache_ttl_seconds` defaults to **0**, meaning a fresh lookup for every operation. Set 1–900 to opt into a session-scoped, in-memory cache. Its absolute deadline starts at resolution and is not extended by reuse. Refresh, stop, expiry, resume and service restart clear it; a late lookup cannot repopulate a cleared generation. Cached values are never journaled or returned by inspection. Core dumps are disabled for the service, guardians and their children; memory zeroization and protection from OS swap are not promised.
 
-## Recovery and observability
+Latchrun does not keep provider authorization alive or detect password-manager lock for cached/already delivered values. Provider lock and rotation affect fresh lookups according to provider policy. Stopping a child does not revoke its credential at the remote service.
 
-`session reconnect` is status inspection. A client disconnect does not stop an accepted operation; output is discarded after the connection fails, and execution continues under the session/command deadlines. Reconnect shows the operation's status, duration, and exit code. Duplicate operation IDs are rejected across all sessions for the entire service lifetime, including failed and unknown outcomes. No command is automatically replayed.
+## Interactive input and shells
 
-A service crash loses all session/history state. Surviving independent workers observe the closed control pipes and terminate ordinary descendants. Killing or crashing a guardian itself can orphan its command and remove its deadline enforcement; the service reports an unknown outcome, and OS/user cleanup may be necessary. Restart removes a stale socket only while holding the service lock. Old session IDs become unknown; consult the target system before deliberately repeating a command whose effect may have happened. A new service cannot deduplicate IDs from a prior service lifetime.
+Default stdin is null. `--stdin` streams input through a bounded pipe; `--tty` allocates a terminal, forwards resize events, and restores the caller's terminal settings on exit. TTY execution merges stdout/stderr and requires a client terminal. Normal runs stream them separately. Exit codes and `128 + signal` propagate; INT, TERM and HUP are forwarded. Cancellation escalates from TERM to KILL after a short grace period.
 
-`inspect` lists declared credential names and sources, never values or references. No credential is fetched for inspection. Status/events omit purpose, project paths, executables, arguments, output, and references; names/IDs are user-visible metadata. Events retain the newest 512 entries in memory. The service admits at most 128 sessions, 1024 operation records, 32 active operations, and 64 connected clients. On capacity exhaustion it denies new work rather than forgetting operation IDs. Restart after reviewing completed operations to reset history.
+A profile can configure `shell: {"executable":"/bin/sh","args":["-c"]}`. `--shell SCRIPT` appends SCRIPT as one argument and applies the same exact command rules. Configuring a shell does not authorize arbitrary scripts.
 
-The private socket protects against other ordinary OS users, not hostile same-user callers. Exact command checks are not a filesystem/network sandbox or a protected-path boundary. Process-group cleanup covers ordinary descendants; hostile programs can escape groups or leak secrets via encoding, files, or network traffic. Only exact known values are redacted from output, not arbitrary secrets an approved program can discover. There is no persistent output log, raw-secret endpoint, dashboard, remote service, automatic retry, or automatic startup at login.
+The runnable [interactive example](examples/fake-interactive.json) demonstrates a 60-second fake cache, an exposed non-secret variable, pipe input and an explicitly approved shell:
 
-## Development
+```sh
+latchrun session start interactive --profile examples/fake-interactive.json
+printf 'hello\n' | latchrun run interactive --stdin -- /bin/cat
+latchrun run interactive --shell 'printf "%s\n" "$APP_MODE" "$TEST_SECRET"'
+latchrun run interactive --tty --shell 'printf "Name: "; read name; printf "hello %s\n" "$name"'
+latchrun session refresh interactive
+latchrun session stop interactive
+```
 
-Install [mise](https://mise.jdx.dev/getting-started.html), then from this checkout:
+Exact known secret values are redacted across read boundaries, including terminal newline conversion. Encoded or partial secrets, values split between stdout and stderr, and other credentials discovered by a child are outside that safeguard. No command output is retained in history.
+
+## Sandbox and workflow recipes
+
+Set `sandbox.enabled` to opt into OS enforcement. The project is readable by default; declare writable directories, additional readable installations and protected paths. Network defaults to deny, including host loopback and filesystem Unix sockets. `network: "allow"` grants general network access, not a host allowlist. A missing or incompatible backend fails closed.
+
+macOS uses Apple's deprecated `/usr/bin/sandbox-exec`; Linux uses `/usr/bin/bwrap`, namespaces and a network-denial seccomp filter. Platform behavior and host requirements differ. Read [the sandbox guide](docs/sandbox.md) before adapting [examples/fake-sandbox.json](examples/fake-sandbox.json). Runtime control files and file-provider credential files are automatically protected. Providers run outside the command sandbox. Same-user processes outside it, readable hardlink aliases/copies, and remote credential authority remain outside its protection.
+
+- **Git SSH:** adapt [examples/git-ssh.json](examples/git-ssh.json) with the project, executable, repository and existing [1Password SSH-agent socket](https://www.1password.dev/ssh/agent). Latchrun supplies the socket without extracting private keys. The child can use the identities that agent permits; this is not a per-key capability. A sandboxed SSH workflow needs network allow.
+- **Git HTTPS:** adapt [examples/git-https.json](examples/git-https.json). `git_https` selects an exact HTTPS host, username and declared `token_env`. A built-in helper supplies the token over Git's private credential pipe; it resets inherited helpers, disables interactive Git prompts, and performs no credential-store writes. Matching is host-scoped, not repository-scoped. The token must be a nonempty UTF-8 single line. `GIT_*` profile variables are disallowed with this integration. Git hooks/configuration remain trusted.
+- **Object storage:** adapt [examples/homelab-s3.json](examples/homelab-s3.json) for a read-only S3-compatible account and an absolute AWS CLI executable. The approved command reads only its declared access-key variables. Apply remote bucket permissions independently of local command policy.
+
+Except for the fake examples, these are templates with fictional references and paths. Install optional tools yourself and adapt paths to verified installations. Automated tests use fake credentials and executable fixtures; real provider or network checks require separately authorized targets.
+
+## Recovery, history and inspection
+
+A client disconnect does not stop an accepted operation. Execution continues under its deadlines, and output is discarded after the connection fails. `session reconnect SESSION` inspects status and outcomes; it never replays output or a command. Treat a lost response as uncertain, then inspect status and reconcile any remote effect before choosing a new operation ID.
+
+Operation IDs are durably reserved before launch. The owner-only journal stores bounded session/operation metadata and used-ID tombstones, never profiles, provider references, credentials, caches, environment values, argv or output. Unsafe, corrupt or inconsistent journals and persistence failures fail closed. After service restart, previously active sessions are `interrupted`, and unfinished operations are `unknown`. Completed outcomes and all reserved IDs remain known. Reactivation requires an explicit profile:
+
+```sh
+latchrun session resume demo --profile examples/fake.json
+latchrun session reconnect demo
+latchrun history prune --keep 100
+```
+
+Resume applies a new validated profile and TTL to an inactive session, clears its cache, preserves its identity/history, and executes nothing. Pruning removes older finalized operation details and empty inactive sessions but preserves used-ID tombstones. A retained session name cannot be reused until its old session is pruned. Deleting the journal/runtime loses deduplication protection; never use deletion as an automatic recovery or retry procedure.
+
+Limits are 128 retained sessions, 1024 operation details, 65536 reserved operation IDs, 512 events, 32 active operations and 64 connected service clients. Capacity exhaustion denies new work. Prune completed details when needed; ID tombstones remain bounded and are never silently evicted.
+
+Independent guardians observe service control-pipe closure and clean up ordinary descendants, including terminal job groups. Killing a guardian itself can orphan its command and remove deadline enforcement. A hostile unsandboxed child can escape process groups/sessions; process cleanup is not a sandbox. Such uncertain outcomes require explicit reconciliation and possibly OS cleanup.
+
+`inspect` reports environment declarations, provenance, expiry and explicitly exposed non-secret values without fetching credentials. Status/events omit project paths, purpose, commands, arguments, references and output. Names and IDs are visible metadata. Statistics cover commands mediated by Latchrun, not whole-agent activity.
+
+## Dashboard and agent integration
+
+Run `latchrun dashboard serve` and open the private startup URL. The loopback-only dashboard shows sessions, outcomes, events and environment provenance, with authenticated stop/refresh controls. Its ephemeral URL capability authorizes those controls; do not share it or expose the listener through a proxy. See [dashboard usage and browser authorization](docs/dashboard.md).
+
+Run `latchrun agent serve` as a stdio MCP server for an agent. It implements MCP 2025-11-25 tools for status, events, inspection, stop, refresh and exact execution in operator-created sessions. It does not create profiles/sessions, expose credentials, or support interactive input. See [agent setup and retry rules](docs/agent-integration.md).
+
+The private socket and dashboard capability protect against other ordinary users or unauthorized browser origins. Neither isolates hostile processes running as the service user. There is no remote service, automatic command replay, automatic startup at login, or whole-machine confinement of the calling agent.
+
+## Development and CI
+
+Install [mise](https://mise.jdx.dev/getting-started.html), then:
 
 ```sh
 mise trust
@@ -82,20 +135,14 @@ mise run build
 ./target/release/latchrun --help
 ```
 
-The project pins stable Rust 1.97.1, including rustfmt, Clippy, Rust Analyzer, and rust-src. Cargo.lock is tracked. Runtime dependencies are Serde/serde_json for bounded typed IPC and profiles, nix for safe Unix process/lock/resource operations, and signal-hook for safe signal handling. Production code forbids unsafe Rust. Use `mise run fmt` to format and `mise run test` for fake-only CLI, redaction, and deterministic lifecycle tests. No library target or documentation tests are currently needed.
+Stable Rust 1.97.1, rustfmt, Clippy, Rust Analyzer and rust-src are pinned; Cargo.lock is tracked. Production code forbids unsafe Rust. Serde handles typed bounded IPC, nix handles safe Unix interfaces, signal-hook forwards signals, and portable-pty/terminal_size support terminals. Use `mise run fmt` to format and `mise run test` for fake-only CLI, lifecycle, recovery, provider, terminal, dashboard, agent and sandbox tests. Native sandbox tests need a functioning OS backend; install bubblewrap on Linux.
 
-## CI
+`mise run ci` runs Linux checks through Dagger 0.21.9 and its Dang SDK. Start a compatible container engine first; Colima with Docker is supported on macOS. The Linux check installs bubblewrap and enables container root capabilities for nested sandbox tests: use a trusted checkout and disposable engine/VM. This CI capability is not required by the normal service. See [sandbox test requirements](docs/sandbox.md#boundaries-and-tests).
 
-`mise run ci` runs the Linux pipeline through Dagger 0.21.9 and its Dang SDK. Start a compatible container engine first. On macOS, Colima with its Docker runtime is supported by the development workflow; native Apple Container requires separate Dagger compatibility setup. Plain native checks do not need a container engine.
+GitHub Actions retains native macOS and Linux Dagger coverage for formatting, compilation, Clippy, tests, release build and help output. CI needs no vault credentials or Dagger Cloud token. Actions are pinned to commits. Keep Rust pins aligned in Cargo.toml, rust-toolchain.toml and mise.toml; keep Dagger aligned in mise.toml, dagger.json and the workflow. Extend the explicit Dagger build-context allowlist when adding compile-time inputs.
 
-GitHub Actions runs the Dagger pipeline on Linux and native checks on macOS. Both check formatting, compilation, Clippy, tests, the release build, and help output. CI needs no 1Password credentials or Dagger Cloud token. The workflow's actions are pinned to commits.
-
-Keep Rust pins aligned in Cargo.toml, rust-toolchain.toml, and mise.toml. Keep the Dagger pin aligned in mise.toml, dagger.json, and the workflow. The Dagger build context explicitly includes source and configuration; extend its allowlist when adding tests or compile-time inputs.
-
-## Contributing
-
-Read [AGENTS.md](AGENTS.md). Use fake credentials for tests; never put real secrets in arguments, fixtures, output, or tracked files. Disposable experiments belong in ignored `scratch/`.
+Read [AGENTS.md](AGENTS.md). Never put real secrets in fixtures, output or tracked files. Disposable experiments belong in ignored `scratch/`.
 
 ## License
 
-Licensed under the [MIT License](LICENSE). See the [publication review](docs/publication-review.md) for the initial content inventory and the [publication decision](docs/decisions/0002-publication-and-license.md) for the rationale.
+[MIT](LICENSE). See the initial [publication review](docs/publication-review.md) and [publication decision](docs/decisions/0002-publication-and-license.md).

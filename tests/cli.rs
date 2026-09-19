@@ -561,7 +561,7 @@ fn sigterm_is_forwarded_and_the_child_is_reaped() {
 }
 
 #[test]
-fn daemon_crash_cleans_up_children_and_restart_loses_history_safely() {
+fn daemon_crash_cleans_up_children_and_recovers_unknown_outcomes() {
     let mut service = Service::start();
     let pid_marker = service.path("crash-child.pid");
     let guardian_marker = service.path("crash-guardian.pid");
@@ -605,8 +605,9 @@ fn daemon_crash_cleans_up_children_and_restart_loses_history_safely() {
     // socket, while keeping the lost operation's outcome explicitly unknown.
     service.restart();
     let previous = service.invoke(["session", "status", &session]);
-    assert!(!previous.status.success());
-    assert!(stderr(&previous).contains("unknown_session"));
+    assert_success(&previous, "recover session metadata");
+    assert!(stdout(&previous).contains("interrupted"));
+    assert!(stdout(&previous).contains("unknown"));
     let retry = service.invoke([
         "run",
         &session,
@@ -618,7 +619,7 @@ fn daemon_crash_cleans_up_children_and_restart_loses_history_safely() {
         &script,
     ]);
     assert!(!retry.status.success());
-    assert!(stderr(&retry).contains("unknown_session"));
+    assert!(stderr(&retry).contains("duplicate_operation"));
     assert_eq!(
         fs::read_to_string(&effect_marker).expect("read crash side effect after retry"),
         "x"
@@ -1152,10 +1153,16 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> ExitStatus {
 }
 
 fn read_pid(path: &Path) -> u32 {
-    fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
-        .parse()
-        .expect("fixture pid is numeric")
+    let deadline = Instant::now() + COMMAND_TIMEOUT;
+    loop {
+        let text = fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        if !text.is_empty() {
+            return text.parse().expect("fixture pid is numeric");
+        }
+        assert!(Instant::now() < deadline, "fixture pid was never written");
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn send_signal(pid: u32, signal: &str) {

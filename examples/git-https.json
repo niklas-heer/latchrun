@@ -1,0 +1,29 @@
+{
+  "project": "/absolute/project",
+  "purpose": "Read remote Git references with an HTTPS credential",
+  "ttl_seconds": 600,
+  "timeout_seconds": 60,
+  "provider": "one_password",
+  "op_path": "/absolute/path/to/op",
+  "credentials": {
+    "ACCESS_TOKEN": "op://Example/Git/token"
+  },
+  "git_https": {
+    "host": "git.example.invalid",
+    "username": "token",
+    "token_env": "ACCESS_TOKEN"
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": "allow"
+  },
+  "commands": [
+    {
+      "executable": "/usr/bin/git",
+      "args": [
+        "ls-remote",
+        "https://git.example.invalid/example/repo.git"
+      ]
+    }
+  ]
+}

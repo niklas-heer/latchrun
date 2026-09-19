@@ -43,11 +43,38 @@ impl From<std::io::Error> for Failure {
     }
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
+    #[default]
     Fake,
     OnePassword,
+    File,
+    PasswordStore,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InputMode {
+    #[default]
+    Null,
+    Pipe,
+    Tty,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellConfig {
+    pub executable: PathBuf,
+    pub args: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitHttps {
+    pub host: String,
+    pub username: String,
+    pub token_env: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -58,7 +85,7 @@ pub struct CommandRule {
     pub args: Vec<String>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
     pub project: PathBuf,
@@ -75,6 +102,20 @@ pub struct Profile {
     pub ssh_auth_sock: Option<PathBuf>,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
+    #[serde(default)]
+    pub cache_ttl_seconds: u64,
+    #[serde(default)]
+    pub provider_path: Option<PathBuf>,
+    #[serde(default)]
+    pub shell: Option<ShellConfig>,
+    #[serde(default)]
+    pub sandbox: crate::sandbox::SandboxPolicy,
+    #[serde(default)]
+    pub environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub expose_environment: Vec<String>,
+    #[serde(default)]
+    pub git_https: Option<GitHttps>,
 }
 
 const fn default_ttl() -> u64 {
@@ -93,6 +134,7 @@ impl Profile {
             || self.credentials.len() > 32
             || self.commands.is_empty()
             || self.commands.len() > 64
+            || self.cache_ttl_seconds > 900
         {
             return Err(invalid_profile());
         }
@@ -105,7 +147,10 @@ impl Profile {
             validate_args(&rule.args)?;
         }
         for (name, reference) in &self.credentials {
-            if !valid_env(name) || reference.len() > 2048 || reference.contains(['\0', '\n', '\r'])
+            if name == "TERM"
+                || !valid_env(name)
+                || reference.len() > 2048
+                || reference.contains(['\0', '\n', '\r'])
             {
                 return Err(invalid_profile());
             }
@@ -120,6 +165,25 @@ impl Profile {
                         return Err(invalid_profile());
                     }
                 }
+                Provider::File => {
+                    let path = reference
+                        .strip_prefix("file://")
+                        .ok_or_else(invalid_profile)?;
+                    if !Path::new(path).is_absolute() {
+                        return Err(invalid_profile());
+                    }
+                }
+                Provider::PasswordStore => {
+                    let entry = reference
+                        .strip_prefix("pass://")
+                        .ok_or_else(invalid_profile)?;
+                    if entry.is_empty()
+                        || entry.starts_with(['-', '/'])
+                        || entry.split('/').any(|part| part == ".." || part.is_empty())
+                    {
+                        return Err(invalid_profile());
+                    }
+                }
             }
         }
         if matches!(self.provider, Provider::OnePassword) && !self.credentials.is_empty() {
@@ -129,13 +193,85 @@ impl Profile {
         } else if self.op_path.is_some() {
             return Err(invalid_profile());
         }
+        if matches!(self.provider, Provider::PasswordStore) {
+            self.provider_path = Some(executable_path(
+                self.provider_path.as_ref().ok_or_else(invalid_profile)?,
+            )?);
+        } else if self.provider_path.is_some() {
+            return Err(invalid_profile());
+        }
+        if let Some(shell) = &mut self.shell {
+            shell.executable = executable_path(&shell.executable)?;
+            validate_args(&shell.args)?;
+        }
+        self.validate_environment()?;
         if let Some(path) = &mut self.ssh_auth_sock {
             *path = canonical_absolute(path)?;
             if !fs::metadata(path)?.file_type().is_socket() {
                 return Err(invalid_profile());
             }
         }
+        crate::sandbox::validate(&mut self.sandbox, &self.project)?;
         Ok(())
+    }
+
+    fn validate_environment(&self) -> Result<(), Failure> {
+        if self.environment.len() > 64 || self.expose_environment.len() > 64 {
+            return Err(invalid_profile());
+        }
+        for (name, value) in &self.environment {
+            if !valid_env(name)
+                || self.credentials.contains_key(name)
+                || value.len() > 4096
+                || value.contains('\0')
+            {
+                return Err(invalid_profile());
+            }
+        }
+        if self
+            .expose_environment
+            .iter()
+            .any(|name| !self.environment.contains_key(name))
+        {
+            return Err(invalid_profile());
+        }
+        if let Some(git) = &self.git_https
+            && (git.host.is_empty()
+                || git.host.len() > 253
+                || !git
+                    .host
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b".-:".contains(&b))
+                || git.username.is_empty()
+                || git.username.len() > 256
+                || git.username.contains(['\n', '\r', '\0'])
+                || !self.credentials.contains_key(&git.token_env)
+                || self
+                    .environment
+                    .keys()
+                    .chain(self.credentials.keys())
+                    .any(|name| name.starts_with("GIT_")))
+        {
+            return Err(invalid_profile());
+        }
+        Ok(())
+    }
+
+    pub fn shell_command(&self, script: &str) -> Result<Vec<String>, Failure> {
+        let shell = self.shell.as_ref().ok_or_else(|| {
+            Failure::new("shell_disabled", "No shell is configured for this session.")
+        })?;
+        let mut argv = vec![
+            shell
+                .executable
+                .to_str()
+                .ok_or_else(invalid_profile)?
+                .to_owned(),
+        ];
+        argv.extend(shell.args.clone());
+        argv.push(script.to_owned());
+        self.authorize(&argv)?;
+        Ok(argv)
     }
 
     pub fn authorize(&self, argv: &[String]) -> Result<(), Failure> {
@@ -234,6 +370,37 @@ pub enum Request {
         session: String,
         operation: String,
         argv: Vec<String>,
+        #[serde(default)]
+        input: InputMode,
+    },
+    Shell {
+        session: String,
+        operation: String,
+        script: String,
+        #[serde(default)]
+        input: InputMode,
+    },
+    Input {
+        session: String,
+        operation: String,
+        data: Vec<u8>,
+        eof: bool,
+    },
+    Resize {
+        session: String,
+        operation: String,
+        rows: u16,
+        cols: u16,
+    },
+    Refresh {
+        session: String,
+    },
+    Resume {
+        session: String,
+        profile: Profile,
+    },
+    Prune {
+        keep: usize,
     },
     Signal {
         session: String,
@@ -336,10 +503,11 @@ pub fn prepare_runtime(path: &Path) -> Result<(), Failure> {
         return Err(fail());
     }
     if !path.exists() {
-        DirBuilder::new()
-            .mode(0o700)
-            .create(path)
-            .map_err(|_| fail())?;
+        match DirBuilder::new().mode(0o700).create(path) {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
+            Err(_) => return Err(fail()),
+        }
     }
     let metadata = fs::symlink_metadata(path).map_err(|_| fail())?;
     if !metadata.is_dir()
@@ -372,6 +540,7 @@ mod tests {
             }],
             op_path: None,
             ssh_auth_sock: None,
+            ..Profile::default()
         })
     }
 

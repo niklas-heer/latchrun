@@ -1,116 +1,73 @@
-# What we want to build
+# Latchrun build brief
 
-Created and updated 2026-09-19. This is the product brief and implementation handoff.
+Created and updated 2026-09-19. This document records product scope, implementation status and the next verification work.
 
 ## Intent and current state
 
-Build **Latchrun**, a focused local intermediary between a person or AI agent and commands requiring credentials. Reuse access throughout a work session, recover connections predictably, and make activity inspectable without exposing secrets.
+Latchrun is a local intermediary between a person or AI agent and commands requiring credentials. It reuses explicitly scoped work sessions, makes activity inspectable without exposing credentials, and recovers connections without replaying uncertain side effects.
 
-The owner accepted the project name, Rust direction, and creation of a separate repository, then delegated a full implementation. This document preserves the product scope and implementation sequence. [0003: Session and execution contract](docs/decisions/0003-session-and-execution-contract.md) records implemented protocols and cache policy. The sandbox backend and UI remain future decisions.
+The owner delegated the full implementation. The original CLI/service milestone and the previously deferred interactive execution, cache, recovery journal, dashboard, agent adapter, additional providers, Git HTTPS helper and OS enforcement are now implemented. [ADR 0004](docs/decisions/0004-full-runtime-and-integrations.md) supersedes the corresponding limitations of [ADR 0003](docs/decisions/0003-session-and-execution-contract.md). See [README.md](README.md) for setup and the current CLI/profile contract.
 
-Current implementation: a local per-user Unix service, immutable named sessions, fake and 1Password CLI providers, explicit SSH-agent mediation, exact-command execution policy, guardian-based process cleanup, signal forwarding, redacted streaming output, expiry, reconnect/status inspection, bounded metadata events/statistics, and duplicate-operation protection. Runtime state is in memory; secrets are resolved per command without cross-command caching. See [README.md](README.md) for commands, profiles, and the explicit same-user/approved-child trust boundary.
-
-The first usable CLI/service scope is implemented. Automated acceptance uses fake credentials and provider fixtures, not live vaults or private infrastructure. Interactive stdin/TTY, persistent recovery journals, HTTPS Git authentication helpers, a dashboard, and OS-enforced filesystem/network restrictions are not implemented. Git SSH and read-only homelab S3 profiles are documented recipes; authorized live end-to-end validation remains outstanding.
+Implemented does not mean that every external tool, provider authorization arrangement or OS version is certified. Automated checks use fake credentials and disposable local resources. Separately authorized read-only workflow checks do not grant authority for future live credential access.
 
 ## User workflows
 
-- Git: perform an authorized Git operation without copying a token or private key into the agent conversation. Prefer the existing 1Password SSH agent for SSH authentication; handle HTTPS separately.
-- Homelab: run a command with only its required credential, reusing an explicitly scoped session rather than repeatedly resolving the secret.
-- Recovery: reconnect after an agent/client disconnect; if the service died, reacquire authorization as necessary and distinguish interrupted work from work safe to retry.
-- Inspection: see active sessions, command status and duration, access decisions, and environment provenance.
-- Protection: prevent obvious destructive mistakes and add enforceable restrictions with clearly stated limits.
+- **Git:** run an approved Git operation using an existing SSH agent or the built-in host-scoped HTTPS helper, without copying a private key/token into the conversation.
+- **Homelab and other services:** give an approved command only its declared credentials and explicit environment; optionally reuse resolved values for a bounded session cache lifetime. Enforce remote permissions at the remote service too.
+- **Interactive work:** stream stdin or allocate a terminal with resize and signal handling; choose explicit configured-shell execution when needed.
+- **Recovery:** inspect accepted work after client loss or service restart, distinguish known outcomes from unknown ones, and explicitly resume with a profile. Never automatically repeat a possibly completed effect.
+- **Inspection:** inspect sessions, durations, exit statuses, access decisions and environment provenance through the CLI, local dashboard or stdio agent adapter.
+- **Protection:** combine exact command rules with optional OS-enforced readable/writable/protected paths and network denial. State clearly what this confines and what remains trusted.
 
-## Product scope
+## Delivered scope and acceptance evidence
 
-### First usable release
+| Area | Implemented behavior | Regression evidence |
+| --- | --- | --- |
+| Local service | Private Unix runtime/socket, background or foreground lifecycle, concurrent callers and bounded framing | Public CLI lifecycle, stale socket, malformed frame and duplicate-ID tests |
+| Sessions and policy | Random IDs/names, immutable profile snapshots, exact canonical executable plus complete arguments, TTL, stop, refresh and explicit resume | State-transition and CLI policy/expiry tests, including denial metadata |
+| Providers | Fake, official 1Password CLI, private existing file, password-store, explicit SSH-agent socket | Fake values and executable fixtures test environment isolation, lookup shape, failure suppression and cancellation |
+| Credential cache | Opt-in 1–900-second memory-only cache, default zero, absolute TTL and generation-safe invalidation | Cache reuse, expiry, refresh and lifecycle regression tests |
+| Child supervision | Isolated guardians, null/pipe/TTY input, terminal resize, signal forwarding, timeouts and descendant cleanup | Public runtime tests for pipe/TTY, terminal job groups, daemon death and stalled providers |
+| Output | Separate pipe streams or combined terminal stream, bounded exact-value redaction, exit propagation | Every-byte-split redaction tests, terminal prompts/multiline values and large-output regression |
+| Recovery | Owner-only atomic metadata journal, durable ID reservation, preserved outcomes, interrupted/unknown recovery, pruning with tombstones | Restart, lost-response, malformed journal, capacity and persistence-failure tests |
+| Git | Existing SSH-agent mediation and built-in exact-host HTTPS credential helper without store writes | SSH socket fixture and actual local Git credential-protocol checks with fake tokens |
+| Sandbox | Fail-closed macOS Seatbelt/Linux bubblewrap backends; path grants, protected paths and network deny/allow | Native macOS and isolated Linux enforcement tests, descendants, TCP/Unix sockets and sandboxed controlling terminal |
+| Dashboard | Loopback browser UI, ephemeral bearer capability, metadata/provenance, confirmed stop/refresh | HTTP authorization/origin/parser/control tests, HTML checks and browser inspection |
+| Agent adapter | MCP 2025-11-25 stdio tools for pre-created sessions, bounded redacted results, no automatic replay | Initialize/tool/policy/malformed-frame and fake execution integration tests |
+| Development | Pinned stable Rust/mise, strict Clippy, native macOS coverage and Linux Dagger checks | Repository check/build/CI tasks; routine tests require no vault or remote infrastructure |
 
-- One Rust binary with a CLI and a local per-user service.
-- Named work sessions scoped to project and purpose, with start, status, reconnect, and stop behavior.
-- 1Password as the first provider, initially through its official CLI. Persist references and non-secret configuration only.
-- Explicit credential lifetime and cache rules; resolve on demand and inject only into approved child processes.
-- Explicit executable/argument execution, correct working directory, exit status, signals, and child cleanup.
-- Structured activity metadata, secret-safe diagnostics, and fail-closed errors when access cannot be authorized.
-- macOS and Linux support, with platform-specific enforcement documented and tested.
+The evidence above describes checked behaviors, not a security audit or a universal compatibility claim. Use the repository checks for the current checkout rather than relying on a historical test count. Runtime source, public integration tests and the linked guides define the concrete contract.
 
-### Later, after the lifecycle is proven
+## Accepted boundaries
 
-- Authenticated local web dashboard: sessions, commands, duration, failures, access history, and policy denials.
-- Environment inspector: name, presence, provider/source, precedence, expiry, and allowlisted non-secret values. No raw-secret endpoint.
-- Configurable shell per profile; explicit shell mode rather than implicit string evaluation.
-- Agent adapters and short integration instructions. Statistics initially cover mediated commands; whole-agent tool usage needs an explicit adapter.
-- Further credential-provider adapters, selected for real use cases.
-- OS-enforced filesystem/network restrictions and narrowly scoped operation proxies where practical. Basic command checks may arrive earlier but must not be presented as a sandbox.
+The service user and profile author are trusted. A private Unix socket restricts other ordinary users, but another process under the same user can supply profiles and control Latchrun. The MCP tool surface only exposes operator-created sessions; it does not constrain an agent that independently has unrestricted shell access. Statistics cover mediated commands, not all agent activity.
 
-## Security and lifecycle requirements
+Exact command matching limits selection, not arbitrary behavior inside an approved program. Shells, hooks, interpreters, executable contents and configuration remain trusted. An enabled sandbox restricts the approved child and descendants, while providers run outside it. Filesystem policies are path-based: readable copies/hardlink aliases and same-user processes outside the sandbox remain outside their protection. Network allow is general access, not endpoint filtering. macOS relies on a deprecated OS interface; Linux requires available namespace capabilities and a compatible bubblewrap. Requested enforcement never silently falls back to unsandboxed execution. See [sandbox.md](docs/sandbox.md).
 
-1. A child given a secret environment variable can read and disclose it. Redaction cannot prevent intentional encoding, file writes, or network leakage. Promise reduced exposure with an explicit trust boundary, not absolute secrecy.
-2. Keep secrets out of the parent shell and AI process where possible. Never place values in command arguments, debug output, crash reports, environment snapshots, or persistent event records. Metadata and command arguments also need filtering.
-3. A private Unix socket limits access by other users but does not isolate hostile processes running as the same user. Define client authorization and capability scope before trusting arbitrary callers.
-4. Separate service lifetime, work-session lifetime, 1Password authorization, and cached-secret lifetime. Decide expiry and behavior on password-manager lock explicitly. Do not silently keep provider authorization alive.
-5. Resume connections, not arbitrary side effects. Assign operation IDs and represent outcome-unknown states. Never automatically replay a possibly completed deployment, deletion, or push.
-6. Stop must deny new access and manage the child process tree. Already delivered credentials cannot be recalled; short-lived credentials or upstream revocation may be needed.
-7. Credentials grant remote power independently of local command policy. Limit homelab permissions at the remote service too.
-8. Command-name matching, aliases, and agent instructions are convenience layers. Hooks, scripts, interpreters, executable resolution, and configuration can change what a command does.
-9. A future dashboard should bind to loopback, authenticate requests, protect browser origins/state-changing requests, and avoid raw output retention by default.
-10. CI and routine tests must not access a live vault or homelab. Real credential smoke checks are separate, authorized, and must not disclose values.
+A child receiving a credential can disclose it through transformed output, allowed files or allowed network traffic. Redaction matches known values and terminal newline variants; it cannot classify arbitrary secrets or reverse deliberate encoding. No credential values, provider references, profiles, arguments or raw command output enter the recovery journal. Only explicit non-secret values may be exposed by environment inspection. Memory zeroization and swap protection are not promised.
 
-## Implementation sequence
+Session lifetime, operation timeout, provider authorization and credential-cache TTL are separate. The cache defaults to zero and never persists across service restart. Provider lock is not detected for cached or delivered values; there is no authorization keepalive. Stop/expiry prevents new work and terminates supervised children, but cannot recall delivered credentials or revoke remote authority.
 
-### 1. Establish the contract with a fake provider
+Guardian control-pipe closure handles ordinary service death independently of service shutdown handlers. Terminal job groups are included. A guardian killed directly can lose cleanup/deadline enforcement, and hostile unsandboxed children can escape process groups/sessions. Unknown outcomes require deliberate reconciliation; no transport or restart automatically repeats a command.
 
-Implemented and covered by the ADR, public CLI tests, and redaction tests. The original acceptance criteria follow.
+Journaled operation IDs survive restart and detail pruning. Profiles and caches do not: resume requires an explicit profile. Bounded capacity fails closed, and losing/deleting the journal loses deduplication history. The journal provides local recovery, not a distributed transaction with an external service.
 
-Write an ADR defining session identity, trusted callers, credential scope, expiry, and crash semantics. Design a small provider interface and CLI/IPC error contract. Keep actual command syntax provisional until this contract is reviewed in implementation.
+## Operational acceptance and next work
 
-Deliver a vertical slice: start a fake session, invoke a harmless child with a fake credential, inspect safe metadata, and stop. No real vault required.
+The requested implementation scope is complete. The next milestone is continued compatibility and operational verification, not a missing dashboard or sandbox implementation:
 
-Acceptance evidence:
-- The intended child receives the fake credential; the caller and activity records do not.
-- An out-of-scope request is denied; malformed IPC fails without leaking input.
-- Repeated authorized calls reuse the session; stop prevents subsequent access.
-- Exit status, stderr/stdout behavior, signal forwarding, and cleanup are observable through CLI tests.
-- Test artifacts and child processes are isolated and cleaned up.
+1. Re-run native macOS and Linux checks when changing terminal, sandbox, IPC or recovery behavior; retain both OS paths in CI. Linux sandbox tests need an isolated container engine with the documented namespace/root capabilities.
+2. Validate the official provider/app authorization setup on each intended deployment OS using separately authorized targets. Fake provider fixtures do not establish that a user's live vault, GPG agent or SSH agent is configured correctly.
+3. Recheck macOS sandbox behavior after OS upgrades and Linux behavior after kernel/bubblewrap changes. Fail closed when a required capability disappears.
+4. Measure warm command overhead separately from provider lookup/unlock, process startup, redaction and command runtime before setting performance targets. Test runtime is not a latency benchmark.
+5. Treat remote hosting, stronger same-user caller isolation, endpoint-specific network proxies, automatic replay, a password vault and whole-agent analytics as separate future scope requiring explicit requirements.
 
-### 2. Prove lifecycle and recovery
+## Guides and decisions
 
-Implemented with bounded operation identity/history, private/stale socket handling, guardian cleanup, fake CLI fault tests, and deterministic production-state tests. Service restart deliberately loses history and reports unknown previous sessions. Reconnect never replays work or old output.
+- [README and workflow examples](README.md)
+- [Sandbox policy and platform limitations](docs/sandbox.md)
+- [Dashboard authorization and controls](docs/dashboard.md)
+- [Agent setup and outcome handling](docs/agent-integration.md)
+- [0004: Full runtime and integrations](docs/decisions/0004-full-runtime-and-integrations.md)
 
-Cover reconnect, concurrent callers, expiry, stale sockets, service crash, child crash, and lost responses. Model time and faults deterministically where useful; retain failing seeds/traces. Establish outcome-unknown behavior and ensure mutating commands are never blindly replayed.
-
-### 3. Add 1Password and one real workflow
-
-Provider adapter and Git SSH/homelab S3 recipes implemented. Fixture tests verify official CLI argument shape, sanitized environment, successful injection, redaction, and suppressed provider diagnostics. No live credential/network workflow was executed; its acceptance evidence requires a separately authorized target.
-
-Use official provider integration; prefer SSH-agent mediation for Git over SSH. Resolve only declared references. Reauthentication failures must explain the required user action without dumping provider output or credentials. Validate one authorized Git workflow and one narrowly scoped homelab workflow.
-
-### 4. Add policy and observability
-
-Exact command/argument rules, bounded metadata retention, provenance inspection, status/duration, and service statistics are implemented. Protected-path enforcement, OS sandboxing, and the authenticated dashboard remain later work, as scoped above.
-
-Implement explainable deterministic rules, protected paths, retention controls, and statistics. Evaluate platform-specific sandboxing with explicit bypass and limitation tests. Build the local dashboard after the event schema and access boundary stabilize.
-
-## Resolved choices and next acceptance work
-
-The initial model reduces accidental disclosure and command-selection mistakes; it trusts same-user callers and approved children. Session identity is a random ID plus a unique name. A private socket controls other-user access; trusted callers can supply profiles. A profile snapshot fixes a session's policy but is not an authorization boundary against another same-user process.
-
-Cached-secret TTL is zero between commands. The provider authorizes each fetch; locks and rotations affect future fetches according to 1Password's policy, not credentials already delivered. Session and operation history remain in memory. Git uses an explicitly approved SSH-agent socket; the homelab recipe lists an S3 bucket through an environment-aware CLI using remote read-only credentials.
-
-Next acceptance work: choose explicitly authorized real Git and homelab targets, validate official 1Password app integration on each supported OS, and record outcomes without secret output. Any cache, persistent journal, interactive execution, or stronger caller capability scheme needs a new decision. Evaluate enforceable macOS/Linux sandbox mechanisms before presenting protected paths/network policy as a security boundary. Build the authenticated dashboard only after selecting its concrete inspection needs.
-
-## Performance and scope discipline
-
-Keep normal policy checks deterministic and local. Measure warm command overhead separately from provider unlock/fetch, process startup, redaction, and command runtime. Do not claim latency targets are achieved before measuring them.
-
-Do not build a password vault, cloud service, general terminal replacement, broad plugin framework, or full agent analytics platform in the first release. The dashboard and additional providers should follow demonstrated needs.
-
-## Relevant prior work
-
-These are reference points, not adopted dependencies:
-
-- [1Password process-scoped injection](https://www.1password.dev/cli/reference/commands/run)
-- [1Password authorization model](https://www.1password.dev/cli/app-integration-security)
-- [1Password SSH agent](https://www.1password.dev/ssh/agent)
-- [Lade](https://github.com/zifeo/lade), for overlapping temporary-access workflows
-- [Anthropic sandbox runtime](https://github.com/anthropics/sandbox-runtime), for OS enforcement and documented limitations
-
-The previous investigation informed this brief; contributors do not need access to the private orchestration hub.
+Contributors do not need private infrastructure or access to a live vault to develop or run the standard checks.

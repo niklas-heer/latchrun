@@ -1,8 +1,8 @@
-//! In-memory local session service. A connection never owns an operation's lifetime.
+//! Durable secret-free metadata and in-memory credential sessions. A connection never owns an operation's lifetime.
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs::{self, File, OpenOptions},
-    io::{BufReader, Write},
+    io::BufReader,
     os::unix::{
         fs::{FileTypeExt, OpenOptionsExt, PermissionsExt},
         net::{UnixListener, UnixStream},
@@ -18,12 +18,14 @@ use std::{
 };
 
 use nix::fcntl::{Flock, FlockArg};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
     execution,
     protocol::{
-        Failure, Profile, Request, Response, random_id, read_frame, validate_id, write_frame,
+        Failure, InputMode, Profile, Request, Response, random_id, read_frame, validate_id,
+        write_frame,
     },
 };
 
@@ -42,6 +44,23 @@ struct Session {
     started: Instant,
     created_at: u64,
     status: &'static str,
+    cache: Cache,
+}
+
+#[derive(Default)]
+struct Cache {
+    values: Option<BTreeMap<String, Vec<u8>>>,
+    fetched: Option<Instant>,
+    fetched_at: Option<u64>,
+    generation: u64,
+}
+impl Cache {
+    fn clear(&mut self) {
+        self.values = None;
+        self.fetched = None;
+        self.fetched_at = None;
+        self.generation = self.generation.saturating_add(1);
+    }
 }
 
 struct Operation {
@@ -75,6 +94,9 @@ struct State {
     sequence: u64,
     denied: u64,
     stopping: bool,
+    used_operations: BTreeSet<String>,
+    journal_path: Option<PathBuf>,
+    journal_failed: bool,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -132,6 +154,7 @@ impl State {
             return;
         }
         session.status = status;
+        session.cache.clear();
         for operation in self
             .operations
             .values()
@@ -143,6 +166,14 @@ impl State {
     }
 
     fn expire(&mut self, now: Instant) {
+        for session in self.sessions.values_mut() {
+            if session.cache.fetched.is_some_and(|at| {
+                now.saturating_duration_since(at)
+                    >= Duration::from_secs(session.profile.cache_ttl_seconds)
+            }) {
+                session.cache.clear();
+            }
+        }
         let expired: Vec<String> = self
             .sessions
             .values()
@@ -168,11 +199,12 @@ impl State {
 
     fn start(&mut self, name: String, mut profile: Profile) -> Result<Value, Failure> {
         validate_id(&name)?;
+        self.protect_runtime(&mut profile)?;
         profile.validate()?;
         if self.sessions.len() >= MAX_SESSIONS {
             return Err(Failure::new(
                 "capacity",
-                "Session capacity reached; restart the service after reviewing completed work.",
+                "Session capacity reached; review and prune completed history before creating sessions.",
             ));
         }
         if self
@@ -193,6 +225,7 @@ impl State {
             started: Instant::now(),
             created_at: timestamp(),
             status: "active",
+            cache: Cache::default(),
         };
         self.sessions.insert(id.clone(), session);
         self.record("started", Some(&id), None);
@@ -207,7 +240,7 @@ impl State {
     ) -> Result<String, Failure> {
         validate_id(operation)?;
         let id = self.session_id(session)?;
-        if self.operations.contains_key(operation) {
+        if self.used_operations.contains(operation) {
             return Err(Failure::new(
                 "duplicate_operation",
                 "Operation ID was already used; inspect its status and do not replay it.",
@@ -223,11 +256,9 @@ impl State {
                 "Session is stopped or expired.",
             ));
         }
-        if let Err(error) = profile.profile.authorize(argv) {
-            self.record("denied", Some(&id), Some(operation));
-            return Err(error);
-        }
-        if self.operations.len() >= MAX_OPERATIONS
+        profile.profile.authorize(argv)?;
+        if self.used_operations.len() >= 65_536
+            || self.operations.len() >= MAX_OPERATIONS
             || self.operations.values().filter(|op| op.active()).count() >= MAX_RUNNING
         {
             return Err(Failure::new(
@@ -235,6 +266,7 @@ impl State {
                 "Operation capacity reached; existing IDs remain reserved.",
             ));
         }
+        self.used_operations.insert(operation.to_owned());
         self.operations.insert(
             operation.to_owned(),
             Operation {
@@ -249,6 +281,7 @@ impl State {
             },
         );
         self.record("accepted", Some(&id), Some(operation));
+        self.persist()?;
         Ok(id)
     }
 
@@ -262,6 +295,18 @@ impl State {
             let session = op.session.clone();
             self.record(status, Some(&session), Some(operation));
         }
+        if self.persist().is_err() {
+            self.journal_failed = true;
+            self.shutdown();
+        }
+    }
+
+    fn deny(&mut self, session: &str, operation: &str) {
+        self.denied = self.denied.saturating_add(1);
+        let id = self.session_id(session).ok();
+        let operation = validate_id(operation).is_ok().then_some(operation);
+        self.record("denied", id.as_deref(), operation);
+        let _ = self.persist();
     }
 }
 
@@ -272,6 +317,310 @@ fn error_response(error: Failure) -> Response {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Snapshot {
+    version: u32,
+    sessions: Vec<SavedSession>,
+    operations: BTreeMap<String, SavedOperation>,
+    used_operations: BTreeSet<String>,
+    events: VecDeque<Value>,
+    sequence: u64,
+    denied: u64,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedSession {
+    id: String,
+    name: String,
+    created_at: u64,
+    ttl_seconds: u64,
+    status: String,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedOperation {
+    session: String,
+    status: String,
+    started_at: u64,
+    duration_ms: Option<u64>,
+    finished_at: Option<u64>,
+    exit_code: Option<i32>,
+}
+
+impl State {
+    fn protect_runtime(&self, profile: &mut Profile) -> Result<(), Failure> {
+        if profile.sandbox.enabled {
+            if let Some(path) = self.journal_path.as_ref().and_then(|path| path.parent()) {
+                profile
+                    .sandbox
+                    .protected_paths
+                    .push(fs::canonicalize(path)?);
+            }
+            if matches!(profile.provider, crate::protocol::Provider::File) {
+                for reference in profile.credentials.values() {
+                    if let Some(path) = reference.strip_prefix("file://") {
+                        profile
+                            .sandbox
+                            .protected_paths
+                            .push(fs::canonicalize(path)?);
+                    }
+                }
+            }
+            if profile.git_https.is_some() {
+                profile.sandbox.read_paths.push(std::env::current_exe()?);
+            }
+        }
+        Ok(())
+    }
+    fn persist(&mut self) -> Result<(), Failure> {
+        let Some(path) = &self.journal_path else {
+            return Ok(());
+        };
+        let snapshot = Snapshot {
+            version: 1,
+            sessions: self
+                .sessions
+                .values()
+                .map(|s| SavedSession {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    created_at: s.created_at,
+                    ttl_seconds: s.profile.ttl_seconds,
+                    status: s.status.into(),
+                })
+                .collect(),
+            operations: self
+                .operations
+                .iter()
+                .map(|(id, op)| {
+                    (
+                        id.clone(),
+                        SavedOperation {
+                            session: op.session.clone(),
+                            status: op.status.into(),
+                            started_at: op.started_at,
+                            duration_ms: op.duration_ms,
+                            finished_at: op.finished_at,
+                            exit_code: op.exit_code,
+                        },
+                    )
+                })
+                .collect(),
+            used_operations: self.used_operations.clone(),
+            events: self.events.clone(),
+            sequence: self.sequence,
+            denied: self.denied,
+        };
+        let result = crate::journal::save(path, &snapshot);
+        if result.is_err() {
+            self.journal_failed = true;
+            self.shutdown();
+        }
+        result
+    }
+
+    fn recover(runtime: &Path) -> Result<Self, Failure> {
+        let path = runtime.join("history.json");
+        let mut state = Self {
+            journal_path: Some(path.clone()),
+            ..Self::default()
+        };
+        let Some(saved) = crate::journal::load::<Snapshot>(&path)? else {
+            return Ok(state);
+        };
+        if saved.version != 1
+            || saved.sessions.len() > MAX_SESSIONS
+            || saved.operations.len() > MAX_OPERATIONS
+            || saved.used_operations.len() > 65_536
+            || saved.events.len() > MAX_EVENTS
+        {
+            return Err(Failure::new(
+                "journal_invalid",
+                "Unsupported or oversized history; do not discard operation records without reconciling effects.",
+            ));
+        }
+        state.used_operations = saved.used_operations;
+        for id in &state.used_operations {
+            validate_id(id)?;
+        }
+        for session in saved.sessions {
+            validate_id(&session.id)?;
+            validate_id(&session.name)?;
+            state.sessions.insert(
+                session.id.clone(),
+                Session {
+                    id: session.id,
+                    name: session.name,
+                    profile: Profile {
+                        ttl_seconds: session.ttl_seconds,
+                        ..Profile::default()
+                    },
+                    started: Instant::now(),
+                    created_at: session.created_at,
+                    status: match session.status.as_str() {
+                        "stopped" => "stopped",
+                        "expired" => "expired",
+                        _ => "interrupted",
+                    },
+                    cache: Cache::default(),
+                },
+            );
+        }
+        for (id, op) in saved.operations {
+            validate_id(&id)?;
+            if !state.sessions.contains_key(&op.session) || !state.used_operations.contains(&id) {
+                return Err(Failure::new(
+                    "journal_invalid",
+                    "Operation history is inconsistent.",
+                ));
+            }
+            state.operations.insert(
+                id,
+                Operation {
+                    session: op.session,
+                    status: match op.status.as_str() {
+                        "succeeded" => "succeeded",
+                        "failed" => "failed",
+                        _ => "unknown",
+                    },
+                    started_at: op.started_at,
+                    started: Instant::now(),
+                    duration_ms: op.duration_ms.or(Some(0)),
+                    finished_at: op.finished_at,
+                    exit_code: op.exit_code,
+                    control: Arc::new(Mutex::new(None)),
+                },
+            );
+        }
+        state.events = saved.events;
+        state.sequence = saved.sequence;
+        state.denied = saved.denied;
+        state.record("recovered", None, None);
+        state.persist()?;
+        Ok(state)
+    }
+
+    fn resume(&mut self, session: &str, mut profile: Profile) -> Result<Value, Failure> {
+        let id = self.session_id(session)?;
+        self.protect_runtime(&mut profile)?;
+        profile.validate()?;
+        let entry = self
+            .sessions
+            .get_mut(&id)
+            .ok_or_else(|| Failure::new("unknown_session", "Session not found."))?;
+        if entry.status == "active"
+            || self
+                .operations
+                .values()
+                .any(|op| op.session == id && op.active())
+        {
+            return Err(Failure::new(
+                "session_active",
+                "Stop the current session before replacing its profile.",
+            ));
+        }
+        entry.profile = profile;
+        entry.status = "active";
+        entry.started = Instant::now();
+        entry.created_at = timestamp();
+        entry.cache.clear();
+        self.record("resumed", Some(&id), None);
+        Ok(self.session_view(&id))
+    }
+
+    fn refresh(&mut self, session: &str) -> Result<Value, Failure> {
+        let id = self.session_id(session)?;
+        if let Some(entry) = self.sessions.get_mut(&id) {
+            entry.cache.clear();
+        }
+        self.record("cache_cleared", Some(&id), None);
+        Ok(json!({"status":"cleared","session":id}))
+    }
+
+    fn prune(&mut self, keep: usize) -> Result<Value, Failure> {
+        if keep > MAX_OPERATIONS {
+            return Err(Failure::new(
+                "retention",
+                "Retention exceeds the operation limit.",
+            ));
+        }
+        let mut finished: Vec<_> = self
+            .operations
+            .iter()
+            .filter(|(_, op)| !op.active())
+            .map(|(id, op)| (op.finished_at.unwrap_or(op.started_at), id.clone()))
+            .collect();
+        finished.sort();
+        let remove = finished.len().saturating_sub(keep);
+        for (_, id) in finished.into_iter().take(remove) {
+            self.operations.remove(&id);
+        }
+        self.sessions.retain(|id, s| {
+            s.status == "active" || self.operations.values().any(|op| op.session == *id)
+        });
+        self.events.clear();
+        self.record("history_pruned", None, None);
+        Ok(
+            json!({"removed":remove,"retained":self.operations.len(),"reserved_ids":self.used_operations.len()}),
+        )
+    }
+
+    fn inspect(&self, session: &str) -> Result<Value, Failure> {
+        let id = self.session_id(session)?;
+        let Some(entry) = self.sessions.get(&id) else {
+            return Err(Failure::new("unknown_session", "Session not found."));
+        };
+        let mut environment = vec![
+            json!({"name":"PATH","source":"fixed","presence":true,"precedence":0,"value":"/usr/bin:/bin"}),
+            json!({"name":"LANG","source":"fixed","presence":true,"precedence":0,"value":"C"}),
+        ];
+        for (name, value) in &entry.profile.environment {
+            let mut item = json!({"name":name,"source":"profile","presence":true,"precedence":1});
+            if entry.profile.expose_environment.contains(name) {
+                item["value"] = json!(value);
+            }
+            environment.push(item);
+        }
+        let expires = entry.cache.fetched_at.map(|at| {
+            at.saturating_add(entry.profile.cache_ttl_seconds)
+                .min(entry.created_at.saturating_add(entry.profile.ttl_seconds))
+        });
+        for name in entry.profile.credentials.keys() {
+            environment.push(json!({"name":name,"source":entry.profile.provider,"declared":true,"presence":if entry.cache.values.is_some(){"cached"}else{"resolved_per_operation"},"precedence":2,"expires_at":expires}));
+        }
+        if entry.profile.ssh_auth_sock.is_some() {
+            environment.push(
+                json!({"name":"SSH_AUTH_SOCK","source":"ssh_agent","presence":true,"precedence":2}),
+            );
+        }
+        Ok(
+            json!({"session":self.session_view(&id),"environment":environment,"credential_cache":if entry.profile.cache_ttl_seconds==0{"none"}else{"memory"},"cache_ttl_seconds":entry.profile.cache_ttl_seconds,"cache_expires_at":expires,"values_available":false,"profile_loaded":entry.status=="active","sandbox_enabled":entry.profile.sandbox.enabled}),
+        )
+    }
+
+    fn cache_resolved(
+        &mut self,
+        session: &str,
+        generation: u64,
+        credentials: BTreeMap<String, Vec<u8>>,
+    ) {
+        self.expire(Instant::now());
+        if let Some(entry) = self.sessions.get_mut(session)
+            && entry.status == "active"
+            && entry.cache.generation == generation
+            && entry.profile.cache_ttl_seconds > 0
+            && credentials.keys().eq(entry.profile.credentials.keys())
+            && credentials.values().map(Vec::len).sum::<usize>() <= 65_536
+        {
+            entry.cache.values = Some(credentials);
+            entry.cache.fetched = Some(Instant::now());
+            entry.cache.fetched_at = Some(timestamp());
+            self.record("credentials_cached", Some(session), None);
+        }
+    }
+}
+
 fn dispatch(state: &mut State, request: Request) -> Result<Value, Failure> {
     state.expire(Instant::now());
     if state.stopping {
@@ -279,7 +628,7 @@ fn dispatch(state: &mut State, request: Request) -> Result<Value, Failure> {
     }
     match request {
         Request::Ping {} => Ok(json!({"status":"running","version":env!("CARGO_PKG_VERSION"),
-            "statistics":{"accepted":state.operations.len(),"denied":state.denied,
+            "statistics":{"accepted":state.used_operations.len(),"denied":state.denied,
                 "running":state.operations.values().filter(|op|op.active()).count(),
                 "succeeded":state.operations.values().filter(|op|op.status == "succeeded").count(),
                 "failed":state.operations.values().filter(|op|op.status == "failed").count(),
@@ -299,29 +648,50 @@ fn dispatch(state: &mut State, request: Request) -> Result<Value, Failure> {
             let events: Vec<&Value> = state.events.iter().filter(|event| id.as_ref().is_none_or(|id| event.get("session").and_then(Value::as_str) == Some(id.as_str()))).collect();
             Ok(json!({"events":events}))
         }
-        Request::Inspect { session } => {
-            let id = state.session_id(&session)?;
-            let environment = state.sessions.get(&id).map(|s| {
-                s.profile.credentials.keys().map(|name| json!({"name":name,"source":s.profile.provider,"declared":true,"presence":"resolved_per_operation"})).collect::<Vec<_>>()
-            }).unwrap_or_default();
-            Ok(json!({"session":state.session_view(&id),"environment":environment,"credential_cache":"none","values_available":false}))
+        Request::Inspect { session } => state.inspect(&session),
+        Request::Refresh { session } => state.refresh(&session),
+        Request::Resume { session, profile } => state.resume(&session, profile),
+        Request::Prune { keep } => state.prune(keep),
+        Request::Input { session, operation, data, eof } => {
+            if data.len() > 8192 { return Err(Failure::new("input_limit", "Input frame is too large.")); }
+            control(state,&session,&operation,&execution::WorkerControl::Input{data,eof})
+        }
+        Request::Resize { session, operation, rows, cols } => {
+            if rows == 0 || cols == 0 || rows > 1000 || cols > 1000 { return Err(Failure::new("terminal_size", "Invalid terminal size.")); }
+            control(state,&session,&operation,&execution::WorkerControl::Resize{rows,cols})
         }
         Request::Signal { session, operation, signal } => {
             if !matches!(signal, 1 | 2 | 3 | 15) {
                 return Err(Failure::new("invalid_signal", "Only HUP, INT, QUIT, and TERM can be forwarded."));
             }
-            let id = state.session_id(&session)?;
-            let op = state.operations.get(&operation).filter(|op|op.session == id)
-                .ok_or_else(|| Failure::new("unknown_operation", "Operation history is unavailable; do not replay the operation."))?;
-            let mut control = lock(&op.control);
-            let pipe = control.as_mut().filter(|_| op.active()).ok_or_else(|| Failure::new("operation_inactive", "Operation is no longer running."))?;
-            writeln!(pipe, "{signal}").map_err(|_|Failure::new("operation_inactive", "Operation is no longer running."))?;
-            drop(control);
-            state.record("signaled", Some(&id), Some(&operation));
-            Ok(json!({"status":"signaled"}))
+            control(state,&session,&operation,&execution::WorkerControl::Signal{signal})
         }
-        Request::Run { .. } => Err(Failure::new("invalid_request", "Invalid request.")),
+        Request::Run { .. } | Request::Shell { .. } => Err(Failure::new("invalid_request", "Invalid request.")),
     }
+}
+
+fn control(
+    state: &mut State,
+    session: &str,
+    operation: &str,
+    message: &execution::WorkerControl,
+) -> Result<Value, Failure> {
+    let id = state.session_id(session)?;
+    let op = state
+        .operations
+        .get(operation)
+        .filter(|op| op.session == id && op.active())
+        .ok_or_else(|| Failure::new("operation_inactive", "Operation is no longer running."))?;
+    let mut control = lock(&op.control);
+    let pipe = control
+        .as_mut()
+        .ok_or_else(|| Failure::new("operation_inactive", "Operation is not ready."))?;
+    write_frame(pipe, message)?;
+    drop(control);
+    if matches!(message, execution::WorkerControl::Signal { .. }) {
+        state.record("signaled", Some(&id), Some(operation));
+    }
+    Ok(json!({"status":"delivered"}))
 }
 
 fn send(stream: &mut Option<UnixStream>, response: &Response) {
@@ -337,7 +707,8 @@ fn launch(
     session: &str,
     operation: &str,
     argv: &[String],
-) -> Result<(Child, ChildStdout), Failure> {
+    input: InputMode,
+) -> Result<(Child, ChildStdout, u64), Failure> {
     let mut state = lock(state);
     state.expire(Instant::now());
     let profile = state
@@ -346,13 +717,14 @@ fn launch(
         .filter(|s| s.status == "active" && !state.stopping)
         .ok_or_else(|| Failure::new("session_inactive", "Session is stopped or expired."))?;
     // spawn only starts a guardian; provider resolution happens after this lock is released.
-    let worker = execution::spawn(&profile.profile, argv)?;
+    let generation = profile.cache.generation;
+    let worker = execution::spawn(&profile.profile, argv, profile.cache.values.clone(), input)?;
     if let Some(op) = state.operations.get_mut(operation) {
         op.status = "running";
         *lock(&op.control) = Some(worker.control);
     }
     drop(state);
-    Ok((worker.child, worker.output))
+    Ok((worker.child, worker.output, generation))
 }
 
 fn run_operation(
@@ -361,9 +733,10 @@ fn run_operation(
     session: &str,
     operation: &str,
     argv: &[String],
+    input: InputMode,
 ) {
-    let worker = launch(state, session, operation, argv);
-    let (mut child, output) = match worker {
+    let worker = launch(state, session, operation, argv, input);
+    let (mut child, output, generation) = match worker {
         Ok(worker) => worker,
         Err(error) => {
             lock(state).finish(operation, "failed", None);
@@ -380,7 +753,18 @@ fn run_operation(
     );
     let mut output = BufReader::new(output);
     loop {
-        match read_frame::<_, Response>(&mut output) {
+        let frame = read_frame::<_, execution::WorkerFrame>(&mut output);
+        if let Ok(execution::WorkerFrame::Resolved { credentials }) = frame {
+            lock(state).cache_resolved(session, generation, credentials);
+            continue;
+        }
+        match frame.map(|frame| match frame {
+            execution::WorkerFrame::Output { response } => response,
+            execution::WorkerFrame::Resolved { .. } => Response::Error {
+                code: "worker_protocol".into(),
+                message: "Invalid worker frame.".into(),
+            },
+        }) {
             Ok(response @ Response::Output { .. }) => send(&mut stream, &response),
             Ok(Response::Finished { exit_code }) => {
                 lock(state).finish(
@@ -392,7 +776,17 @@ fn run_operation(
                     },
                     Some(exit_code),
                 );
-                send(&mut stream, &Response::Finished { exit_code });
+                if lock(state).journal_failed {
+                    send(
+                        &mut stream,
+                        &error_response(Failure::new(
+                            "outcome_unknown",
+                            "History could not be committed; inspect operation status.",
+                        )),
+                    );
+                } else {
+                    send(&mut stream, &Response::Finished { exit_code });
+                }
                 break;
             }
             Ok(response @ Response::Error { .. }) => {
@@ -424,10 +818,46 @@ fn handle(state: &Shared, mut stream: UnixStream) {
         );
         return;
     };
+    let request = match request {
+        Request::Shell {
+            session,
+            operation,
+            script,
+            input,
+        } => {
+            let result = {
+                let state = lock(state);
+                state.session_id(&session).and_then(|id| {
+                    state
+                        .sessions
+                        .get(&id)
+                        .ok_or_else(|| Failure::new("unknown_session", "Session not found."))
+                        .and_then(|s| s.profile.shell_command(&script))
+                })
+            };
+            match result {
+                Ok(argv) => Request::Run {
+                    session,
+                    operation,
+                    argv,
+                    input,
+                },
+                Err(error) => {
+                    let mut state = lock(state);
+                    state.deny(&session, &operation);
+                    drop(state);
+                    let _ = write_frame(&mut stream, &error_response(error));
+                    return;
+                }
+            }
+        }
+        request => request,
+    };
     if let Request::Run {
         session,
         operation,
         mut argv,
+        input,
     } = request
     {
         let reserved = normalize_executable(&mut argv).and_then(|()| {
@@ -436,16 +866,25 @@ fn handle(state: &Shared, mut stream: UnixStream) {
             state.reserve(&session, &operation, &argv)
         });
         match reserved {
-            Ok(id) => run_operation(state, Some(stream), &id, &operation, &argv),
+            Ok(id) => run_operation(state, Some(stream), &id, &operation, &argv, input),
             Err(error) => {
                 let mut state = lock(state);
-                state.denied = state.denied.saturating_add(1);
+                state.deny(&session, &operation);
                 drop(state);
                 let _ = write_frame(&mut stream, &error_response(error));
             }
         }
     } else {
-        let result = dispatch(&mut lock(state), request);
+        let result = {
+            let mut state = lock(state);
+            let before = state.sequence;
+            let result = dispatch(&mut state, request);
+            if before == state.sequence {
+                result
+            } else {
+                state.persist().and(result)
+            }
+        };
         let response = result.map_or_else(error_response, |data| Response::Ok { data });
         let _ = write_frame(&mut stream, &response);
     }
@@ -554,8 +993,10 @@ impl Drop for ClientGuard {
 }
 
 pub fn serve(runtime: &Path) -> Result<(), Failure> {
+    nix::sys::resource::setrlimit(nix::sys::resource::Resource::RLIMIT_CORE, 0, 0)
+        .map_err(|_| Failure::new("service_error", "Cannot disable core dumps."))?;
     let (listener, _lock, _socket) = listener(runtime)?;
-    let state = Arc::new(Mutex::new(State::default()));
+    let state = Arc::new(Mutex::new(State::recover(runtime)?));
     let stopping = Arc::new(AtomicBool::new(false));
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
         signal_hook::flag::register(signal, Arc::clone(&stopping))
@@ -565,8 +1006,12 @@ pub fn serve(runtime: &Path) -> Result<(), Failure> {
     loop {
         {
             let mut state = lock(&state);
+            let sequence = state.sequence;
             state.expire(Instant::now());
             if stopping.load(Ordering::Relaxed) {
+                state.shutdown();
+            }
+            if state.sequence != sequence && state.persist().is_err() {
                 state.shutdown();
             }
             if state.stopping {
@@ -575,6 +1020,11 @@ pub fn serve(runtime: &Path) -> Result<(), Failure> {
         }
         match listener.accept() {
             Ok((stream, _)) => {
+                // macOS inherits a listener's nonblocking flag on accepted sockets.
+                // Framed writes must complete under the per-connection deadlines.
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
                 if clients.load(Ordering::Relaxed) >= MAX_CLIENTS {
                     drop(stream);
                     continue;
@@ -640,6 +1090,7 @@ mod tests {
             }],
             op_path: None,
             ssh_auth_sock: None,
+            ..Profile::default()
         };
         let mut state = State::default();
         state.sessions.insert(
@@ -651,6 +1102,7 @@ mod tests {
                 started,
                 created_at: 1,
                 status: "active",
+                cache: Cache::default(),
             },
         );
         Ok((state, argv))
@@ -686,7 +1138,7 @@ mod tests {
         state.stop_session("session", "stopped");
         let state = Arc::new(Mutex::new(state));
         assert!(
-            matches!(launch(&state, "session", "operation", &argv), Err(error) if error.code == "session_inactive")
+            matches!(launch(&state, "session", "operation", &argv, InputMode::Null), Err(error) if error.code == "session_inactive")
         );
         Ok(())
     }

@@ -1,0 +1,49 @@
+{
+  "project": "/tmp",
+  "purpose": "Demonstrate fake cache, explicit shell and interactive input",
+  "ttl_seconds": 600,
+  "timeout_seconds": 60,
+  "provider": "fake",
+  "cache_ttl_seconds": 60,
+  "credentials": {
+    "TEST_SECRET": "fake://demo"
+  },
+  "environment": {
+    "APP_MODE": "demo"
+  },
+  "expose_environment": [
+    "APP_MODE"
+  ],
+  "shell": {
+    "executable": "/bin/sh",
+    "args": [
+      "-c"
+    ]
+  },
+  "commands": [
+    {
+      "executable": "/usr/bin/printenv",
+      "args": [
+        "TEST_SECRET"
+      ]
+    },
+    {
+      "executable": "/bin/cat",
+      "args": []
+    },
+    {
+      "executable": "/bin/sh",
+      "args": [
+        "-c",
+        "printf \"%s\\n\" \"$APP_MODE\" \"$TEST_SECRET\""
+      ]
+    },
+    {
+      "executable": "/bin/sh",
+      "args": [
+        "-c",
+        "printf \"Name: \"; read name; printf \"hello %s\\n\" \"$name\""
+      ]
+    }
+  ]
+}

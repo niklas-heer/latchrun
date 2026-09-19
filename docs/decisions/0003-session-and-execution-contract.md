@@ -3,6 +3,7 @@
 Date: 2026-09-19
 Status: Accepted and implemented under the owner's delegated full-implementation task
 Supersedes: the dependency-free scaffold status in [0001](0001-project-baseline.md)
+Superseded in part by: [0004: Full runtime and integrations](0004-full-runtime-and-integrations.md); the original milestone and evidence below are preserved as history.
 
 ## Decision
 

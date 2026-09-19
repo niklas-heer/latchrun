@@ -1,0 +1,29 @@
+{
+  "project": "/absolute/project",
+  "purpose": "Demonstrate read-only project and a single writable build directory",
+  "ttl_seconds": 600,
+  "timeout_seconds": 30,
+  "provider": "fake",
+  "credentials": {
+    "TEST_SECRET": "fake://demo"
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": "deny",
+    "write_paths": [
+      "/absolute/project/build"
+    ],
+    "protected_paths": [
+      "/absolute/project/.env"
+    ]
+  },
+  "commands": [
+    {
+      "executable": "/bin/sh",
+      "args": [
+        "-c",
+        "printf \"%s\\n\" \"$TEST_SECRET\"; printf \"built\\n\" > build/result"
+      ]
+    }
+  ]
+}

@@ -18,6 +18,8 @@ type LatchrunCi {
   pub ci: String! {
     container
       .from("ghcr.io/jdx/mise:2026.9.5")
+      .withExec(["apt-get", "update"])
+      .withExec(["apt-get", "install", "--yes", "--no-install-recommends", "bubblewrap"])
       .withoutFile("/mise/config.toml")
       .withWorkdir("/src")
       .withEnvVariable("MISE_TRUSTED_CONFIG_PATHS", "/src")
@@ -26,7 +28,9 @@ type LatchrunCi {
       .withExec(["mise", "install"])
       .withDirectory("/src", source)
       .withMountedCache("/src/target", cacheVolume("latchrun-rust-1-97-1-target"), sharing: CacheSharingMode.LOCKED)
-      .withExec(["mise", "run", "check"])
+      # Real nested bubblewrap enforcement needs namespace/mount capabilities.
+      # The checkout must be trusted: this grants privileged container access.
+      .withExec(["mise", "run", "check"], insecureRootCapabilities: true)
       .withExec(["mise", "run", "build"])
       .withExec(["./target/release/latchrun", "--help"])
       .stdout

@@ -14,11 +14,11 @@ use std::{
 };
 
 use crate::protocol::{
-    Failure, MAX_FRAME, Profile, Request, Response, prepare_runtime, random_id, read_frame,
-    validate_id, write_frame,
+    Failure, InputMode, MAX_FRAME, Profile, Request, Response, prepare_runtime, random_id,
+    read_frame, validate_id, write_frame,
 };
 use signal_hook::{
-    consts::{SIGHUP, SIGINT, SIGTERM},
+    consts::{SIGHUP, SIGINT, SIGTERM, SIGWINCH},
     iterator::Signals,
 };
 
@@ -40,6 +40,10 @@ pub fn main_cli() -> Result<i32, Failure> {
             PathBuf::from,
         )
     };
+    dispatch_cli(&runtime, &args)
+}
+
+fn dispatch_cli(runtime: &Path, args: &[String]) -> Result<i32, Failure> {
     match args
         .iter()
         .map(String::as_str)
@@ -55,32 +59,53 @@ pub fn main_cli() -> Result<i32, Failure> {
             Ok(0)
         }
         ["service", "serve"] => {
-            prepare_runtime(&runtime)?;
-            crate::service::serve(&runtime)?;
+            prepare_runtime(runtime)?;
+            crate::service::serve(runtime)?;
             Ok(0)
         }
         ["service", "start"] => {
-            start_service(&runtime)?;
+            start_service(runtime)?;
             Ok(0)
         }
-        ["service", "status"] => show(&runtime, &Request::Ping {}),
-        ["service", "stop"] => show(&runtime, &Request::Shutdown {}),
-        ["session", "start", name, "--profile", path] => {
-            validate_id(name)?;
-            let profile = load_profile(Path::new(path))?;
-            show(
-                &runtime,
-                &Request::Start {
-                    name: (*name).into(),
-                    profile,
-                },
-            )
+        ["service", "status"] => show(runtime, &Request::Ping {}),
+        ["service", "stop"] => show(runtime, &Request::Shutdown {}),
+        ["session", "start", name, "--profile", path] => start_session(runtime, name, path),
+        ["dashboard", "serve"] => {
+            crate::dashboard::serve(runtime, 0)?;
+            Ok(0)
         }
-        ["session", "status"] => show(&runtime, &Request::Status { session: None }),
+        ["dashboard", "serve", "--port", port] => {
+            crate::dashboard::serve(runtime, port.parse().map_err(|_| usage())?)?;
+            Ok(0)
+        }
+        ["agent", "serve"] => {
+            crate::agent::serve(runtime)?;
+            Ok(0)
+        }
+        ["session", "refresh", session] => show(
+            runtime,
+            &Request::Refresh {
+                session: (*session).into(),
+            },
+        ),
+        ["session", "resume", session, "--profile", path] => show(
+            runtime,
+            &Request::Resume {
+                session: (*session).into(),
+                profile: load_profile(Path::new(path))?,
+            },
+        ),
+        ["history", "prune", "--keep", keep] => show(
+            runtime,
+            &Request::Prune {
+                keep: keep.parse().map_err(|_| usage())?,
+            },
+        ),
+        ["session", "status"] => show(runtime, &Request::Status { session: None }),
         ["session", "status" | "reconnect", session] => {
             validate_id(session)?;
             show(
-                &runtime,
+                runtime,
                 &Request::Status {
                     session: Some((*session).into()),
                 },
@@ -89,17 +114,17 @@ pub fn main_cli() -> Result<i32, Failure> {
         ["session", "stop", session] => {
             validate_id(session)?;
             show(
-                &runtime,
+                runtime,
                 &Request::Stop {
                     session: (*session).into(),
                 },
             )
         }
-        ["events"] => show(&runtime, &Request::Events { session: None }),
+        ["events"] => show(runtime, &Request::Events { session: None }),
         ["events", session] => {
             validate_id(session)?;
             show(
-                &runtime,
+                runtime,
                 &Request::Events {
                     session: Some((*session).into()),
                 },
@@ -108,15 +133,26 @@ pub fn main_cli() -> Result<i32, Failure> {
         ["inspect", session] => {
             validate_id(session)?;
             show(
-                &runtime,
+                runtime,
                 &Request::Inspect {
                     session: (*session).into(),
                 },
             )
         }
-        ["run", session, rest @ ..] => run(&runtime, session, rest),
+        ["run", session, rest @ ..] => run(runtime, session, rest),
         _ => Err(usage()),
     }
+}
+
+fn start_session(runtime: &Path, name: &str, path: &str) -> Result<i32, Failure> {
+    validate_id(name)?;
+    show(
+        runtime,
+        &Request::Start {
+            name: name.into(),
+            profile: load_profile(Path::new(path))?,
+        },
+    )
 }
 
 fn load_profile(path: &Path) -> Result<Profile, Failure> {
@@ -144,7 +180,7 @@ fn usage() -> Failure {
     Failure::new("usage", "Invalid arguments. Use latchrun --help.")
 }
 
-fn connect(runtime: &Path) -> Result<UnixStream, Failure> {
+pub fn connect(runtime: &Path) -> Result<UnixStream, Failure> {
     prepare_runtime(runtime)?;
     let socket = runtime.join("service.sock");
     let metadata = socket.symlink_metadata().map_err(|_| unavailable())?;
@@ -170,7 +206,7 @@ fn unavailable() -> Failure {
     )
 }
 
-fn request(runtime: &Path, request: &Request) -> Result<Response, Failure> {
+pub fn request(runtime: &Path, request: &Request) -> Result<Response, Failure> {
     let mut stream = connect(runtime)?;
     write_frame(&mut stream, request)?;
     read_frame(&mut BufReader::new(stream))
@@ -231,29 +267,55 @@ fn start_service(runtime: &Path) -> Result<(), Failure> {
 
 fn run(runtime: &Path, session: &str, arguments: &[&str]) -> Result<i32, Failure> {
     validate_id(session)?;
-    let (operation, argv) = match arguments {
-        ["--operation", id, "--", argv @ ..] if !argv.is_empty() => {
-            validate_id(id)?;
-            ((*id).to_owned(), argv)
+    let mut operation = None;
+    let mut input = InputMode::Null;
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index] {
+            "--operation" => {
+                index += 1;
+                let id = arguments.get(index).ok_or_else(usage)?;
+                validate_id(id)?;
+                operation = Some((*id).to_owned());
+            }
+            "--stdin" if input == InputMode::Null => input = InputMode::Pipe,
+            "--tty" if input == InputMode::Null => input = InputMode::Tty,
+            "--" | "--shell" => break,
+            _ => return Err(usage()),
         }
-        ["--", argv @ ..] if !argv.is_empty() => {
-            let id = random_id()?;
-            eprintln!("latchrun: operation {id}");
-            (id, argv)
-        }
-        _ => return Err(usage()),
+        index += 1;
+    }
+    let operation = if let Some(id) = operation {
+        id
+    } else {
+        let id = random_id()?;
+        eprintln!("latchrun: operation {id}");
+        id
     };
-    let mut stream = connect(runtime)?;
-    let mut signals = Signals::new([SIGINT, SIGTERM, SIGHUP])?;
-    let signal_handle = signals.handle();
-    write_frame(
-        &mut stream,
-        &Request::Run {
+    let query = match arguments.get(index..) {
+        Some(["--", argv @ ..]) if !argv.is_empty() => Request::Run {
             session: session.into(),
             operation: operation.clone(),
             argv: argv.iter().map(|s| (*s).into()).collect(),
+            input,
         },
-    )?;
+        Some(["--shell", script]) => Request::Shell {
+            session: session.into(),
+            operation: operation.clone(),
+            script: (*script).into(),
+            input,
+        },
+        _ => return Err(usage()),
+    };
+    let _terminal = if input == InputMode::Tty {
+        Some(crate::terminal::RawMode::enable()?)
+    } else {
+        None
+    };
+    let mut stream = connect(runtime)?;
+    let mut signals = Signals::new([SIGINT, SIGTERM, SIGHUP, SIGWINCH])?;
+    let signal_handle = signals.handle();
+    write_frame(&mut stream, &query)?;
     stream.set_read_timeout(None)?;
     let mut reader = BufReader::new(stream);
     let result = (|| {
@@ -264,11 +326,21 @@ fn run(runtime: &Path, session: &str, arguments: &[&str]) -> Result<i32, Failure
             Response::Error { code, message } => return Err(Failure { code, message }),
             _ => return Err(Failure::new("protocol", "Unexpected service response.")),
         }
+        if input != InputMode::Null {
+            forward_input(runtime, session, &operation);
+        }
+        if input == InputMode::Tty {
+            resize(runtime, session, &operation);
+        }
         let signal_runtime = runtime.to_owned();
         let signal_session = session.to_owned();
         let signal_operation = operation.clone();
         let signal_thread = thread::spawn(move || {
             for signal in signals.forever() {
+                if signal == SIGWINCH {
+                    resize(&signal_runtime, &signal_session, &signal_operation);
+                    continue;
+                }
                 let _ = request(
                     &signal_runtime,
                     &Request::Signal {
@@ -290,6 +362,42 @@ fn run(runtime: &Path, session: &str, arguments: &[&str]) -> Result<i32, Failure
             Failure::new("outcome_unknown", "Response lost. Reconnect to the session and inspect the operation ID; never automatically replay a command.")
         } else { error }
     })
+}
+
+fn resize(runtime: &Path, session: &str, operation: &str) {
+    let (rows, cols) = crate::terminal::size();
+    let _ = request(
+        runtime,
+        &Request::Resize {
+            session: session.into(),
+            operation: operation.into(),
+            rows,
+            cols,
+        },
+    );
+}
+fn forward_input(runtime: &Path, session: &str, operation: &str) {
+    let runtime = runtime.to_owned();
+    let session = session.to_owned();
+    let operation = operation.to_owned();
+    thread::spawn(move || {
+        let mut input = io::stdin();
+        let mut buffer = [0u8; 8192];
+        while let Ok(size) = input.read(&mut buffer) {
+            let result = request(
+                &runtime,
+                &Request::Input {
+                    session: session.clone(),
+                    operation: operation.clone(),
+                    data: buffer[..size].to_vec(),
+                    eof: size == 0,
+                },
+            );
+            if size == 0 || !matches!(result, Ok(Response::Ok { .. })) {
+                break;
+            }
+        }
+    });
 }
 
 fn receive_output(reader: &mut BufReader<UnixStream>) -> Result<i32, Failure> {
@@ -324,15 +432,20 @@ Usage: latchrun [--runtime-dir PATH] COMMAND\n\n\
   service start | serve | status | stop\n\
   session start NAME --profile FILE\n\
   session status [SESSION] | reconnect SESSION | stop SESSION\n\
-  run SESSION [--operation ID] -- /absolute/executable [ARG ...]\n\
+  run SESSION [--operation ID] [--stdin | --tty] -- /absolute/executable [ARG ...]\n\
+  run SESSION [--operation ID] [--stdin | --tty] --shell SCRIPT\n\
+  session refresh SESSION | resume SESSION --profile FILE\n\
+  dashboard serve [--port PORT]\n\
+  agent serve\n\
+  history prune --keep COUNT\n\
   inspect SESSION\n\
   events [SESSION]\n\
   --help | --version\n\n\
 Profiles are JSON. Commands and arguments require an exact allowlist match.\n\
-Runs use null stdin and stream redacted stdout/stderr. No implicit shell.\n\
+Runs default to null stdin; --stdin streams input and --tty allocates a terminal.\n\
 Reconnect inspects status; it never replays commands or retained output.\n\
-Sessions expire after 1 hour by default. Secrets are fetched for each run.\n\
-Trust boundary: same-user clients and approved children; this is not a sandbox.\n\
+Sessions expire after 1 hour by default. Credential caching is explicit and bounded.\n\
+Enable an OS sandbox explicitly in a profile to enforce filesystem/network policy.\n\
 See README.md for profiles, recovery and the 1Password/SSH workflows."
     );
 }

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>Latchrun · Local sessions</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%2313785c%27/%3E%3Cpath d=%27M13 8H9v16h4m6-16h4v16h-4%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272%27/%3E%3C/svg%3E">
+<style nonce="__NONCE__">
+:root{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#202b31;background:#f6f7f5;font-synthesis:none;--panel:#fff;--line:#e2e7e3;--muted:#6b797c;--accent:#13785c;--soft:#eaf5ef;--danger:#ad463b;--shadow:0 3px 20px #233d3010}
+*{box-sizing:border-box}body{margin:0}button,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #39ac87;outline-offset:4px}button{border:1px solid var(--line);border-radius:8px;padding:9px 13px;background:var(--panel);color:inherit;font-size:13px;font-weight:600}button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}.primary{background:var(--accent);color:white;border-color:var(--accent)}.primary:hover:not(:disabled){background:#095d44;color:white}.danger{color:var(--danger)}.quiet{border:0;background:transparent}.mono,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}header{height:76px;display:flex;align-items:center;justify-content:space-between;padding:0 5vw;background:var(--panel);border-bottom:1px solid var(--line)}.brand{display:flex;gap:12px;align-items:center;font-size:21px;font-weight:750;letter-spacing:-.7px}.logo{background:var(--accent);color:white;width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-family:monospace;font-size:21px;letter-spacing:-4px;padding-right:4px}.header-right{display:flex;align-items:center;gap:14px;color:var(--muted);font-size:12px}.local{border:1px solid var(--line);border-radius:20px;padding:6px 10px}.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#36a879;margin-right:7px}main{max-width:1400px;margin:auto;padding:44px 5vw 24px}.eyebrow{text-transform:uppercase;font-size:10px;letter-spacing:1.7px;color:var(--accent);font-weight:750}.intro{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:30px}h1{font-size:34px;letter-spacing:-1.3px;margin:10px 0 9px;line-height:1.12;font-weight:650}.intro p{margin:0;color:var(--muted);font-size:14px;line-height:1.6}.intro-actions{display:flex;align-items:center;gap:14px}.subtle{font-size:11px;color:var(--muted)}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:21px 22px;box-shadow:var(--shadow)}.stat-label{font-size:12px;color:var(--muted);display:flex;justify-content:space-between}.stat-number{font-size:32px;font-weight:600;letter-spacing:-1px;margin:12px 0 5px}.stat-note{font-size:11px;color:var(--muted)}.good{color:var(--accent)}.warning{color:var(--danger)}.workspace{display:grid;grid-template-columns:minmax(290px,.8fr) minmax(450px,1.65fr);gap:22px;align-items:start}.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}.panel-head{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid var(--line);gap:12px}.panel-head h2{font-size:14px;margin:0;font-weight:650;letter-spacing:-.2px}.count{display:inline-grid;place-items:center;min-width:22px;height:21px;border-radius:5px;background:var(--soft);color:var(--accent);font-size:10px;margin-left:7px}.session-list{padding:10px}.session{width:100%;text-align:left;display:block;padding:17px 15px;border:1px solid transparent;border-radius:8px;margin-bottom:5px;font-weight:400}.session:last-child{margin-bottom:0}.session.selected{border-color:#a6cbbb;background:var(--soft)}.session-top{display:flex;justify-content:space-between;align-items:center;gap:8px}.session-name{font-weight:650;font-size:13px;overflow-wrap:anywhere}.badge{display:inline-block;font-size:10px;line-height:1.6;padding:2px 7px;border-radius:5px;background:var(--soft);color:var(--accent);text-transform:capitalize;font-weight:600;white-space:nowrap}.badge.inactive{background:#eff0f1;color:#6b7179}.badge.bad{background:#fff0ec;color:var(--danger)}.session-id{color:var(--muted);font-size:10px;margin-top:10px;overflow-wrap:anywhere}.session-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;margin-top:14px;gap:8px}.detail-top{padding:23px 22px 18px}.detail-title{display:flex;justify-content:space-between;gap:12px;align-items:center}.detail-title h2{font-size:19px;margin:0 0 7px;font-weight:650;overflow-wrap:anywhere}.detail-title .subtle{overflow-wrap:anywhere}.detail-actions{display:flex;gap:5px;flex-shrink:0}.detail-meta{display:flex;gap:24px;margin-top:22px;font-size:11px;color:var(--muted)}.detail-meta strong{display:block;margin-top:5px;color:inherit;font-weight:500}.tabs{display:flex;border-bottom:1px solid var(--line);padding:0 22px;gap:26px}.tab{border:0;background:transparent;border-radius:0;padding:15px 0 13px;font-size:12px;color:var(--muted);border-bottom:2px solid transparent}.tab[aria-selected=true]{border-color:var(--accent);color:var(--accent)}.tab-content{padding:22px}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:11px;text-align:left}th{font-size:9px;text-transform:uppercase;letter-spacing:1px;font-weight:600;color:var(--muted);padding:0 9px 13px;border-bottom:1px solid var(--line)}td{padding:15px 9px;border-bottom:1px solid var(--line);vertical-align:middle;overflow-wrap:anywhere}th:first-child,td:first-child{padding-left:0}th:last-child,td:last-child{padding-right:0}tr:last-child td{border-bottom:0}.table-note{font-size:11px;color:var(--muted);line-height:1.7;border-top:1px solid var(--line);margin-top:14px;padding-top:15px}.empty{text-align:center;padding:44px 20px;color:var(--muted);font-size:12px;line-height:1.8}.empty-symbol{display:block;color:var(--accent);font-size:23px;margin-bottom:10px}.empty strong{display:block;color:inherit;font-size:14px;font-weight:600}.empty code{display:block;margin-top:14px;padding:10px;border:1px solid var(--line);border-radius:6px;text-align:left;white-space:normal;overflow-wrap:anywhere;font-size:10px}.activity{margin-top:24px}.timeline{padding:8px 22px;max-height:340px;overflow:auto}.event{display:grid;grid-template-columns:11px 1fr auto;gap:13px;padding:15px 0;border-bottom:1px solid var(--line);align-items:center}.event:last-child{border-bottom:0}.event-mark{width:7px;height:7px;background:#91b4a6;border-radius:50%}.event-title{font-size:11px;font-weight:550}.event-sub{font-size:10px;color:var(--muted);margin-top:5px;overflow-wrap:anywhere}.event time{font-size:10px;color:var(--muted);white-space:nowrap}.banner{border:1px solid #d9b5a3;background:#fff7ef;color:#844730;padding:13px 16px;border-radius:8px;font-size:12px;margin-bottom:22px;line-height:1.7}.security-note{display:flex;align-items:start;gap:10px;padding:17px 20px;margin-top:18px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:11px;line-height:1.8}.security-note b{color:var(--accent);font-weight:550}footer{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:35px;padding:19px 0;color:var(--muted);font-size:10px;gap:10px}[hidden]{display:none!important}.env-name{font-weight:600}.env-extra{display:block;font-size:9px;color:var(--muted);margin-top:5px}.loading{opacity:.6}.inspector-note{font-size:11px;line-height:1.7;color:var(--muted);margin:0 0 20px}.access-head{font-size:11px;color:var(--muted);line-height:1.7;margin:0 0 18px}
+@media(max-width:960px){main{padding-top:30px}.workspace{grid-template-columns:1fr}.session-list{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}.session{margin:0}.stats{gap:10px}.stat{padding:17px}.intro-actions .subtle{display:none}}
+@media(max-width:580px){header{height:65px}.header-right .local{display:none}main{padding:26px 18px 20px}header{padding:0 18px}h1{font-size:28px}.intro{align-items:start}.intro p{font-size:12px}.intro-actions button{padding:9px;font-size:11px}.stats{grid-template-columns:repeat(2,1fr)}.stat-number{font-size:28px}.session-list{display:block}.detail-title{align-items:start;flex-direction:column}.detail-actions{margin-top:8px}.detail-meta{gap:15px}.panel-head,.detail-top{padding-left:17px;padding-right:17px}.tabs{padding:0 17px;gap:22px}.tab-content{padding:17px}.timeline{padding:5px 17px}.event{grid-template-columns:7px 1fr;gap:10px}.event time{grid-column:2}footer{flex-direction:column}.brand{font-size:20px}}
+@media(prefers-color-scheme:dark){:root{color:#e1eae6;background:#131b18;--panel:#1a2420;--line:#2b3b33;--muted:#91a69b;--accent:#7acdaf;--soft:#243b30;--danger:#ed9d8f;--shadow:0 3px 20px #0001}.logo,.primary{background:#267e60;color:white;border-color:#267e60}.session.selected{border-color:#456b58}.badge.inactive{background:#303a35;color:#acb8b0}.badge.bad{background:#49332b;color:#ed9d8f}.banner{background:#3a2c21;color:#e8c5a6;border-color:#775138}}
+</style>
+</head>
+<body>
+<header><div class="brand"><span class="logo" aria-hidden="true">⟦⟧</span>latchrun</div><div class="header-right"><span class="local">LOCAL WORKSPACE</span><span id="connection"><i class="dot"></i>Connecting</span></div></header>
+<main>
+<div class="intro"><div><div class="eyebrow">Your local control room</div><h1>Work sessions</h1><p>Understand what's running. Keep access in scope.</p></div><div class="intro-actions"><span id="updated" class="subtle">Waiting for service</span><button id="reload" type="button">↻ Refresh</button></div></div>
+<div class="banner" id="error" role="alert" hidden></div>
+<section class="stats" aria-label="Service statistics">
+<div class="stat"><div class="stat-label">Active sessions<span aria-hidden="true">◉</span></div><div id="stat-sessions" class="stat-number">—</div><div class="stat-note">Scoped work environments</div></div>
+<div class="stat"><div class="stat-label">Commands running<span aria-hidden="true">↗</span></div><div id="stat-running" class="stat-number">—</div><div id="stat-accepted" class="stat-note">Mediated by Latchrun</div></div>
+<div class="stat"><div class="stat-label">Succeeded<span aria-hidden="true">✓</span></div><div id="stat-succeeded" class="stat-number good">—</div><div class="stat-note">Completed with exit code 0</div></div>
+<div class="stat"><div class="stat-label">Needs attention<span aria-hidden="true">◇</span></div><div id="stat-attention" class="stat-number">—</div><div id="stat-denied" class="stat-note">Failures, unknowns & policy denials</div></div>
+</section>
+<div class="workspace">
+<aside><section class="panel"><div class="panel-head"><h2>Sessions <span id="session-count" class="count">0</span></h2><span class="subtle">All lifetimes</span></div><div id="sessions" class="session-list"><div class="empty">Loading sessions…</div></div></section><div class="security-note"><span aria-hidden="true">◈</span><div><b>Credentials stay behind the scenes.</b><br>This view contains metadata and explicitly exposed non-secret environment values. Credential values and command output are never available.</div></div></aside>
+<div><section class="panel" id="detail"><div class="empty"><span class="empty-symbol" aria-hidden="true">⌘</span><strong>Select a session</strong>Inspect its commands, environment and access history.</div></section><section class="panel activity"><div class="panel-head"><h2>Recent activity</h2><span class="subtle">Latest 100 events</span></div><div id="activity" class="timeline"><div class="empty">Waiting for activity…</div></div></section></div>
+</div>
+<footer><span>Latchrun <span id="version"></span> · Local service · Loopback only</span><span>Metadata only. No automatic command replay.</span></footer>
+</main>
+<script nonce="__NONCE__">
+'use strict';
+const $ = id => document.getElementById(id);
+const fragment = new URLSearchParams(location.hash.slice(1));
+let token = fragment.get('token');
+try { if (token) sessionStorage.setItem('latchrun-token', token); else token = sessionStorage.getItem('latchrun-token'); } catch (_) { /* In-memory authentication still works when browser storage is disabled. */ }
+history.replaceState(null, '', location.pathname);
+let sessions = [], events = [], selected = null, currentTab = 'commands', busy = false, inspection = null;
+const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
+const number = value => new Intl.NumberFormat().format(value || 0);
+const when = value => value ? new Date(value * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
+const duration = value => value < 1000 ? `${number(value)} ms` : `${(value / 1000).toFixed(1)} s`;
+const human = value => String(value ?? 'unknown').replaceAll('_', ' ');
+function badge(status) { return el('span', human(status), 'badge' + (['failed','unknown','denied'].includes(status) ? ' bad' : ['stopped','expired','recovered','interrupted'].includes(status) ? ' inactive' : '')); }
+function empty(title, description) { const node = el('div', undefined, 'empty'); node.append(el('strong', title), el('span', description)); return node; }
+function error(message) { $('error').textContent = message; $('error').hidden = !message; }
+async function api(path, body) {
+  if (!token) throw new Error('Open the private link printed by “latchrun dashboard serve” to authenticate this tab.');
+  const response = await fetch(path, {method: body ? 'POST' : 'GET', headers: {'Authorization':`Bearer ${token}`, ...(body ? {'Content-Type':'application/json'} : {})}, ...(body ? {body:JSON.stringify(body)} : {}), cache:'no-store', credentials:'omit', signal:AbortSignal.timeout(12000)});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Could not reach the local service.');
+  return data;
+}
+function table(headers, rows) { const wrap = el('div', undefined, 'table-wrap'), result = el('table'), head = el('tr'), body = el('tbody'); headers.forEach(label => head.append(el('th', label))); const thead = el('thead'); thead.append(head); rows.forEach(cells => { const row = el('tr'); cells.forEach(cell => { const td = el('td'); if (cell instanceof Node) td.append(cell); else td.textContent = cell; row.append(td); }); body.append(row); }); result.append(thead, body); wrap.append(result); return wrap; }
+function restoreFocus(id) { if (id) document.getElementById(id)?.focus({preventScroll:true}); }
+function renderSessions() {
+  const focusedId = document.activeElement?.id;
+  $('sessions').replaceChildren(); $('session-count').textContent = sessions.length;
+  if (!sessions.length) { const node = empty('No sessions yet', 'Start a scoped session from your terminal.'); node.append(el('code', 'latchrun session start demo --profile examples/fake.json')); $('sessions').append(node); return; }
+  sessions.forEach(session => {
+    const button = el('button', undefined, 'session' + (session.id === selected ? ' selected' : '')); button.type = 'button'; button.id = `session-${session.id}`; button.setAttribute('aria-pressed', session.id === selected ? 'true' : 'false');
+    const top = el('div', undefined, 'session-top'); top.append(el('span', session.name, 'session-name'), badge(session.status));
+    const meta = el('div', undefined, 'session-meta'); meta.append(el('span', `${(session.operations || []).length} commands`), el('span', `Created ${when(session.created_at)}`));
+    button.append(top, el('div', session.id, 'session-id mono'), meta); button.addEventListener('click', () => { selected = session.id; inspection = null; renderSessions(); renderDetail(); loadInspection(); }); $('sessions').append(button);
+  });
+  restoreFocus(focusedId);
+}
+async function mutate(action) {
+  const session = sessions.find(item => item.id === selected); if (!session || busy) return;
+  const message = action === 'stop' ? `Stop session “${session.name}”? New access will be denied and running commands will be terminated. Already delivered credentials cannot be recalled.` : `Refresh credentials for “${session.name}”? The next command will reacquire credentials. Running commands keep their delivered values.`;
+  if (!confirm(message)) return;
+  busy = true; renderDetail();
+  try { await api(`/api/session/${action}`, {session:selected}); error(''); } catch (failure) { error(failure.message); }
+  finally { busy = false; await refresh(); }
+}
+function renderDetail() {
+  const focusedId = document.activeElement?.id;
+  const target = $('detail'), session = sessions.find(item => item.id === selected); target.replaceChildren();
+  if (!session) { target.append(empty('Select a session', 'Inspect its commands, environment and access history.')); return; }
+  const top = el('div', undefined, 'detail-top'), title = el('div', undefined, 'detail-title'), name = el('div'); name.append(el('h2', session.name), el('div', session.id, 'subtle mono'));
+  const actions = el('div', undefined, 'detail-actions'); [['refresh','Refresh access'],['stop','Stop session']].forEach(([action,label]) => { const button = el('button', label, action === 'stop' ? 'danger' : ''); button.type = 'button'; button.id = `session-action-${action}`; button.disabled = session.status !== 'active' || busy; button.addEventListener('click', () => mutate(action)); actions.append(button); }); title.append(name, actions);
+  const meta = el('div', undefined, 'detail-meta'); [['Status',badge(session.status)],['Created',when(session.created_at)],['Expires',when(session.expires_at)]].forEach(([label,value]) => {const entry = el('div', label); const strong = el('strong'); if (value instanceof Node) strong.append(value); else strong.textContent = value; entry.append(strong); meta.append(entry);}); top.append(title,meta);
+  const tabs = el('div', undefined, 'tabs'); tabs.setAttribute('role','tablist'); tabs.setAttribute('aria-label','Session inspection'); ['commands','environment','access'].forEach(tab => { const button = el('button', tab[0].toUpperCase() + tab.slice(1), 'tab'); button.type = 'button'; button.id = `tab-${tab}`; button.tabIndex = currentTab === tab ? 0 : -1; button.setAttribute('role','tab'); button.setAttribute('aria-selected', currentTab === tab ? 'true' : 'false'); button.setAttribute('aria-controls','tab-panel'); button.addEventListener('click', () => {currentTab = tab; renderDetail(); $(`tab-${tab}`).focus();}); button.addEventListener('keydown', event => {if (!['ArrowRight','ArrowLeft','Home','End'].includes(event.key)) return; event.preventDefault(); const choices = ['commands','environment','access']; currentTab = choices[event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (choices.indexOf(currentTab) + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; renderDetail(); $(`tab-${currentTab}`).focus(); }); tabs.append(button); });
+  const content = el('div', undefined, 'tab-content'); content.id = 'tab-panel'; content.setAttribute('role','tabpanel'); content.setAttribute('aria-labelledby', `tab-${currentTab}`);
+  if (currentTab === 'commands') renderCommands(content, session);
+  if (currentTab === 'environment') renderEnvironment(content);
+  if (currentTab === 'access') { content.append(el('p', 'Access decisions and lifecycle changes for this session. Command arguments and provider references are omitted.', 'access-head')); renderEvents(content, events.filter(event => event.session === session.id).slice(-40).reverse()); }
+  target.append(top,tabs,content);
+  restoreFocus(focusedId);
+}
+function renderCommands(content, session) {
+  const operations = [...(session.operations || [])].sort((a,b) => b.started_at - a.started_at);
+  if (!operations.length) content.append(empty('Ready for scoped work', 'Approved commands will appear here as they run.'));
+  else content.append(table(['Operation','Status','Duration','Exit'], operations.map(operation => [el('span',operation.id,'mono'),badge(operation.status),duration(operation.duration_ms || 0),operation.exit_code === null ? '—' : String(operation.exit_code)])));
+  content.append(el('div', 'Operation IDs identify deliberate executions. Reconnecting never replays a command. Arguments, credential values and output are omitted.', 'table-note'));
+}
+function renderEnvironment(content) {
+  if (!inspection) { content.append(empty('Loading environment', 'Inspecting metadata without resolving credentials.')); return; }
+  content.append(el('p', 'The declared child environment, ordered by name. Credential values are hidden. Presence describes delivery policy, not proof that a provider is currently unlocked.', 'inspector-note'));
+  const environment = [...(inspection.environment || [])].sort((a,b) => a.name.localeCompare(b.name));
+  if (!environment.length) content.append(empty('No environment metadata', 'This session declares no additional environment variables.'));
+  else content.append(table(['Variable / source','Presence / precedence','Expiry / value'], environment.map(variable => {
+    const name = el('div', variable.name, 'env-name mono'); name.append(el('span', human(variable.source), 'env-extra'));
+    const presence = el('div', typeof variable.presence === 'boolean' ? (variable.presence ? 'Present' : 'Absent') : human(variable.presence)); presence.append(el('span', `Precedence: ${variable.precedence ?? '—'}`, 'env-extra'));
+    const value = el('div', variable.expires_at ? when(variable.expires_at) : '—'); value.append(el('span', Object.hasOwn(variable,'value') && variable.value !== null ? String(variable.value) : 'Value hidden', 'env-extra mono'));
+    return [name,presence,value];
+  })));
+  content.append(el('div', `Credential cache: ${human(inspection.credential_cache)}. Refresh access invalidates cached credentials; the next command reacquires authorization as needed.`, 'table-note'));
+}
+function renderEvents(target, items) {
+  if (!items.length) {target.append(empty('Nothing to report yet', 'Session and access activity will appear here.')); return;}
+  items.forEach(event => { const row = el('div', undefined, 'event'), detail = el('div'); detail.append(el('div',human(event.kind),'event-title')); const session = sessions.find(item => item.id === event.session); detail.append(el('div',[session ? session.name : event.session, event.operation].filter(Boolean).join(' · ') || 'Local service','event-sub mono')); row.append(el('span',undefined,'event-mark'),detail,el('time',when(event.timestamp))); target.append(row); });
+}
+async function loadInspection() { const requested = selected; if (!requested) return; try {const data = await api(`/api/inspect?session=${encodeURIComponent(requested)}`); if (selected === requested) {inspection = data; if (currentTab === 'environment') renderDetail();}} catch (failure) { error(failure.message); } }
+async function refresh() {
+  const focusedReload = document.activeElement === $('reload');
+  $('reload').disabled = true;
+  try {
+    const [status, history] = await Promise.all([api('/api/status'),api('/api/events')]);
+    sessions = status.sessions || []; events = history.events || []; const stats = status.service.statistics || {};
+    if (!sessions.some(session => session.id === selected)) selected = sessions.find(session => session.status === 'active')?.id || sessions[0]?.id || null;
+    $('stat-sessions').textContent = number(sessions.filter(session => session.status === 'active').length); $('stat-running').textContent = number(stats.running); $('stat-accepted').textContent = `${number(stats.accepted)} commands accepted`; $('stat-succeeded').textContent = number(stats.succeeded); $('stat-attention').textContent = number((stats.failed || 0) + (stats.unknown || 0) + (stats.denied || 0)); $('stat-denied').textContent = `${number(stats.failed)} failed · ${number(stats.unknown)} unknown · ${number(stats.denied)} denied`;
+    $('connection').replaceChildren(el('i',undefined,'dot'),document.createTextNode('Service connected')); $('version').textContent = status.service.version || ''; $('updated').textContent = `Updated ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+    error(''); renderSessions(); renderDetail(); $('activity').replaceChildren(); renderEvents($('activity'),events.slice(-100).reverse()); await loadInspection();
+  } catch (failure) { $('connection').textContent = 'Disconnected'; error(failure.message || 'Could not connect. Check that the local service and dashboard are running.'); }
+  finally {$('reload').disabled = false; if (focusedReload && document.activeElement === document.body) restoreFocus('reload');}
+}
+$('reload').addEventListener('click',refresh);
+refresh();
+setInterval(() => {if (!document.hidden && !$('reload').disabled && !busy) refresh();},5000);
+</script>
+</body>
+</html>

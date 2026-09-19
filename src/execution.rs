@@ -1,25 +1,39 @@
-//! Credential resolution and process-group supervision in a short-lived worker.
-use std::collections::BTreeMap;
-use std::ffi::OsStr;
-use std::io::{self, BufRead, BufReader, Read};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread;
-use std::time::{Duration, Instant};
-
-use nix::sys::resource::{Resource, setrlimit};
-use nix::sys::signal::{Signal, killpg};
-use nix::unistd::{Pid, User, getuid};
+//! Credential resolution and process supervision in a short-lived guardian.
+use crate::{
+    protocol::{Failure, InputMode, Profile, Response, read_frame, write_frame},
+    providers::{self, Credentials, SECRET_LIMIT},
+};
+use nix::{
+    sys::{
+        resource::{Resource, setrlimit},
+        signal::{Signal, killpg},
+    },
+    unistd::{Pid, User, getpgid, getsid, getuid},
+};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::BTreeSet,
+    ffi::OsStr,
+    io::{self, BufReader, Read, Write},
+    os::unix::{
+        ffi::{OsStrExt, OsStringExt},
+        process::{CommandExt, ExitStatusExt},
+    },
+    path::Path,
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
-use crate::protocol::{Failure, Profile, Provider, Response, read_frame, write_frame};
-
-const SECRET_LIMIT: usize = 65_536;
 const POLL: Duration = Duration::from_millis(10);
 const KILL_GRACE: Duration = Duration::from_millis(200);
+const INPUT_LIMIT: usize = 8192;
 
 pub struct Worker {
     pub child: Child,
@@ -28,16 +42,41 @@ pub struct Worker {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorkerFrame {
+    Output { response: Response },
+    Resolved { credentials: Credentials },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkerControl {
+    Signal { signal: i32 },
+    Input { data: Vec<u8>, eof: bool },
+    Resize { rows: u16, cols: u16 },
+}
+
+#[derive(Serialize, Deserialize)]
 struct WorkerSpec {
+    profile: Profile,
+    argv: Vec<String>,
+    cached_credentials: Option<Credentials>,
+    input: InputMode,
+}
+#[derive(Serialize, Deserialize)]
+struct PtySpec {
     profile: Profile,
     argv: Vec<String>,
 }
 
-pub fn spawn(profile: &Profile, argv: &[String]) -> Result<Worker, Failure> {
-    let executable = std::env::current_exe().map_err(|_| worker_failure())?;
-    let mut child = Command::new(executable)
+pub fn spawn(
+    profile: &Profile,
+    argv: &[String],
+    cached_credentials: Option<Credentials>,
+    input: InputMode,
+) -> Result<Worker, Failure> {
+    let mut child = Command::new(std::env::current_exe().map_err(|_| worker_failure())?)
         .arg("__worker")
-        // A daemon process-group kill must leave this guardian alive to observe EOF.
         .process_group(0)
         .env_clear()
         .stdin(Stdio::piped())
@@ -58,6 +97,8 @@ pub fn spawn(profile: &Profile, argv: &[String]) -> Result<Worker, Failure> {
     let spec = WorkerSpec {
         profile: profile.clone(),
         argv: argv.to_vec(),
+        cached_credentials,
+        input,
     };
     if write_frame(&mut control, &spec).is_err() {
         drop(control);
@@ -77,27 +118,58 @@ fn worker_failure() -> Failure {
         "Could not start or supervise the approved command.",
     )
 }
-
-fn provider_failure() -> Failure {
-    Failure::new(
-        "provider_unavailable",
-        "Credential resolution failed. Unlock 1Password and sign in with its official CLI, then try again.",
-    )
+fn cancelled() -> Failure {
+    Failure::new("cancelled", "Command execution was cancelled.")
+}
+fn lock<T>(value: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    value
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-#[derive(Default)]
+struct InputChunk {
+    data: Vec<u8>,
+    eof: bool,
+}
 struct ProcessState {
     group: Option<Pid>,
-    cancellation: Option<(Instant, Signal)>,
+    session: Option<Pid>,
+    cancellation: Option<Instant>,
+    forced: bool,
+    terminal: Option<Box<dyn MasterPty + Send>>,
+    size: PtySize,
+    input_error: bool,
+}
+impl Default for ProcessState {
+    fn default() -> Self {
+        Self {
+            group: None,
+            session: None,
+            cancellation: None,
+            forced: false,
+            terminal: None,
+            size: PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+            input_error: false,
+        }
+    }
 }
 
-struct Supervisor {
+pub struct Supervisor {
     state: Arc<Mutex<ProcessState>>,
     done: Arc<AtomicBool>,
+    input: Mutex<Option<mpsc::Receiver<InputChunk>>>,
 }
-
 impl Supervisor {
-    fn start(input: BufReader<io::Stdin>, timeout: Duration) -> Result<Self, Failure> {
+    fn start(
+        input: BufReader<io::Stdin>,
+        timeout: Duration,
+        mode: InputMode,
+    ) -> Result<Self, Failure> {
         let state = Arc::new(Mutex::new(ProcessState::default()));
         let done = Arc::new(AtomicBool::new(false));
         let interrupted = Arc::new(AtomicBool::new(false));
@@ -110,67 +182,162 @@ impl Supervisor {
             signal_hook::flag::register(signal, Arc::clone(&interrupted))
                 .map_err(|_| worker_failure())?;
         }
+        let (sender, receiver) = mpsc::sync_channel(128);
         let control_state = Arc::clone(&state);
-        thread::spawn(move || monitor_control(input, &control_state));
+        thread::Builder::new()
+            .name("control".into())
+            .spawn(move || monitor_control(input, &control_state, &sender, mode))
+            .map_err(|_| worker_failure())?;
         let watchdog_state = Arc::clone(&state);
         let watchdog_done = Arc::clone(&done);
-        thread::spawn(move || {
-            let start = Instant::now();
-            while !watchdog_done.load(Ordering::Acquire) {
-                let mut locked = watchdog_state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if interrupted.load(Ordering::Acquire) || start.elapsed() >= timeout {
-                    cancel(&mut locked, Signal::SIGTERM);
+        thread::Builder::new()
+            .name("watchdog".into())
+            .spawn(move || {
+                let start = Instant::now();
+                while !watchdog_done.load(Ordering::Acquire) {
+                    let mut state = lock(&watchdog_state);
+                    if interrupted.load(Ordering::Acquire) || start.elapsed() >= timeout {
+                        cancel(&mut state, Signal::SIGTERM);
+                    }
+                    if state
+                        .cancellation
+                        .is_some_and(|at| at.elapsed() >= KILL_GRACE)
+                        && !state.forced
+                    {
+                        signal_tree(&state, Signal::SIGKILL);
+                        state.forced = true;
+                    }
+                    drop(state);
+                    thread::sleep(POLL);
                 }
-                if let (Some(group), Some((at, _))) = (locked.group, locked.cancellation)
-                    && at.elapsed() >= KILL_GRACE
-                {
-                    let _ = killpg(group, Signal::SIGKILL);
-                }
-                drop(locked);
-                thread::sleep(POLL);
-            }
-        });
-        Ok(Self { state, done })
+            })
+            .map_err(|_| worker_failure())?;
+        Ok(Self {
+            state,
+            done,
+            input: Mutex::new(Some(receiver)),
+        })
     }
-
     fn spawn(&self, command: &mut Command) -> Result<Child, Failure> {
-        // Hold the same lock used by cancellation across spawn and registration.
-        let mut state = self.state.lock().map_err(|_| worker_failure())?;
+        let mut state = lock(&self.state);
         if state.cancellation.is_some() {
-            return Err(Failure::new(
-                "cancelled",
-                "Command execution was cancelled.",
-            ));
+            return Err(cancelled());
         }
-        let child = command
+        let mut child = command
             .process_group(0)
             .spawn()
             .map_err(|_| worker_failure())?;
-        let raw = i32::try_from(child.id()).map_err(|_| worker_failure())?;
+        let Ok(raw) = i32::try_from(child.id()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(worker_failure());
+        };
         state.group = Some(Pid::from_raw(raw));
         drop(state);
         Ok(child)
     }
-
-    fn cleanup(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(group) = state.group.take() {
-            let _ = killpg(group, Signal::SIGKILL);
+    fn spawn_tty(
+        &self,
+        spec: &WorkerSpec,
+        credentials: &Credentials,
+    ) -> Result<(Child, Box<dyn Read + Send>), Failure> {
+        let mut state = lock(&self.state);
+        if state.cancellation.is_some() {
+            return Err(cancelled());
         }
+        let pair = native_pty_system()
+            .openpty(state.size)
+            .map_err(|_| worker_failure())?;
+        let mut builder =
+            CommandBuilder::new(std::env::current_exe().map_err(|_| worker_failure())?);
+        builder.arg("__ptyexec");
+        builder.env_clear();
+        builder.cwd(&spec.profile.project);
+        let mut environment = Command::new("unused");
+        configure_environment(&mut environment, &spec.profile, credentials);
+        for (name, value) in environment.get_envs() {
+            if let Some(value) = value {
+                builder.env(name, value);
+            }
+        }
+        builder.env(
+            "TERM",
+            spec.profile
+                .environment
+                .get("TERM")
+                .map_or("xterm-256color", String::as_str),
+        );
+        let payload = serde_json::to_string(&PtySpec {
+            profile: spec.profile.clone(),
+            argv: spec.argv.clone(),
+        })
+        .map_err(|_| worker_failure())?;
+        if payload.len() > 65_536 {
+            return Err(Failure::new(
+                "pty_spec",
+                "TTY profile and command exceed the 64 KiB limit.",
+            ));
+        }
+        builder.env("LATCHRUN_PTY_SPEC", payload);
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|_| worker_failure())?;
+        let writer = pair.master.take_writer().map_err(|_| worker_failure())?;
+        let boxed: Box<dyn portable_pty::Child> = pair
+            .slave
+            .spawn_command(builder)
+            .map_err(|_| worker_failure())?;
+        let mut child = match boxed.downcast::<Child>() {
+            Ok(child) => *child,
+            Err(mut child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(worker_failure());
+            }
+        };
+        drop(pair.slave);
+        let Ok(raw) = i32::try_from(child.id()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(worker_failure());
+        };
+        let group = Pid::from_raw(raw);
+        state.group = Some(group);
+        state.session = Some(group);
+        state.terminal = Some(pair.master);
+        drop(state);
+        self.start_input(writer)?;
+        Ok((child, reader))
     }
-
-    fn cancelled(&self) -> bool {
-        self.state
-            .lock()
-            .map_or(true, |state| state.cancellation.is_some())
+    fn start_input(&self, mut writer: impl Write + Send + 'static) -> Result<(), Failure> {
+        let receiver = lock(&self.input).take().ok_or_else(worker_failure)?;
+        thread::Builder::new()
+            .name("stdin".into())
+            .spawn(move || {
+                while let Ok(chunk) = receiver.recv() {
+                    if writer.write_all(&chunk.data).is_err()
+                        || writer.flush().is_err()
+                        || chunk.eof
+                    {
+                        return;
+                    }
+                }
+            })
+            .map_err(|_| worker_failure())?;
+        Ok(())
+    }
+    fn cleanup(&self) {
+        let mut state = lock(&self.state);
+        signal_tree(&state, Signal::SIGKILL);
+        state.group = None;
+        state.session = None;
+        state.terminal = None;
+    }
+    pub fn cancelled(&self) -> bool {
+        lock(&self.state).cancellation.is_some()
     }
 }
-
 impl Drop for Supervisor {
     fn drop(&mut self) {
         self.cleanup();
@@ -178,35 +345,149 @@ impl Drop for Supervisor {
     }
 }
 
-fn cancel(state: &mut ProcessState, signal: Signal) {
-    state
-        .cancellation
-        .get_or_insert_with(|| (Instant::now(), signal));
+fn signal_tree(state: &ProcessState, signal: Signal) {
+    if let Some(group) = state
+        .terminal
+        .as_ref()
+        .and_then(|terminal| terminal.process_group_leader())
+    {
+        let _ = killpg(Pid::from_raw(group), signal);
+    }
+    if let Some(session) = state.session {
+        signal_session(session, signal);
+    }
     if let Some(group) = state.group {
         let _ = killpg(group, signal);
     }
 }
 
-fn monitor_control(mut input: BufReader<io::Stdin>, state: &Mutex<ProcessState>) {
+fn signal_session(session: Pid, signal: Signal) {
+    // Shell job control creates multiple groups in one session. Ask the OS to
+    // verify membership before signaling each discovered group.
+    let mut groups = BTreeSet::new();
+    for pid in process_ids() {
+        if getsid(Some(pid)).ok() == Some(session)
+            && let Ok(group) = getpgid(Some(pid))
+        {
+            groups.insert(group);
+        }
+    }
+    for group in groups {
+        let _ = killpg(group, signal);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_ids() -> Vec<Pid> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .take(262_144)
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+        })
+        .filter(|pid| *pid > 0)
+        .map(Pid::from_raw)
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_ids() -> Vec<Pid> {
+    let Ok(mut ps) = Command::new("/bin/ps")
+        .args(["-axo", "pid="])
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return Vec::new();
+    };
+    let Some(output) = ps.stdout.take() else {
+        let _ = ps.kill();
+        let _ = ps.wait();
+        return Vec::new();
+    };
+    let mut bytes = Vec::new();
+    let result = output.take(2_097_153).read_to_end(&mut bytes);
+    if bytes.len() > 2_097_152 {
+        let _ = ps.kill();
+    }
+    let _ = ps.wait();
+    if result.is_err() || bytes.len() > 2_097_152 {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&bytes)
+        .split_whitespace()
+        .filter_map(|pid| pid.parse::<i32>().ok())
+        .filter(|pid| *pid > 0)
+        .map(Pid::from_raw)
+        .collect()
+}
+
+fn cancel(state: &mut ProcessState, signal: Signal) {
+    if state.cancellation.is_none() {
+        state.cancellation = Some(Instant::now());
+        signal_tree(state, signal);
+    }
+}
+
+fn monitor_control(
+    mut input: BufReader<io::Stdin>,
+    state: &Mutex<ProcessState>,
+    sender: &mpsc::SyncSender<InputChunk>,
+    mode: InputMode,
+) {
+    let mut input_ended = false;
     loop {
-        let mut line = String::new();
-        let result = input.by_ref().take(32).read_line(&mut line);
-        let signal = match result {
-            Ok(0) | Err(_) => None,
-            Ok(_) if !line.ends_with('\n') => None,
-            Ok(_) => Some(match line.trim().parse::<i32>() {
-                Ok(1) => Signal::SIGHUP,
-                Ok(2) => Signal::SIGINT,
-                Ok(3) => Signal::SIGQUIT,
-                _ => Signal::SIGTERM,
-            }),
-        };
-        let mut locked = state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        cancel(&mut locked, signal.unwrap_or(Signal::SIGTERM));
-        if signal.is_none() {
+        let Ok(control) = read_frame::<_, WorkerControl>(&mut input) else {
+            cancel(&mut lock(state), Signal::SIGTERM);
             return;
+        };
+        match control {
+            WorkerControl::Signal { signal } => {
+                let signal = match signal {
+                    1 => Signal::SIGHUP,
+                    2 => Signal::SIGINT,
+                    3 => Signal::SIGQUIT,
+                    _ => Signal::SIGTERM,
+                };
+                cancel(&mut lock(state), signal);
+            }
+            WorkerControl::Input { data, eof } => {
+                if !matches!(mode, InputMode::Null)
+                    && !input_ended
+                    && data.len() <= INPUT_LIMIT
+                    && sender.try_send(InputChunk { data, eof }).is_ok()
+                {
+                    input_ended = eof;
+                } else {
+                    let mut state = lock(state);
+                    state.input_error = true;
+                    cancel(&mut state, Signal::SIGTERM);
+                    drop(state);
+                }
+            }
+            WorkerControl::Resize { rows, cols } => {
+                if !matches!(mode, InputMode::Tty) || rows == 0 || cols == 0 {
+                    continue;
+                }
+                let mut state = lock(state);
+                state.size = PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                };
+                if let Some(terminal) = &state.terminal {
+                    let _ = terminal.resize(state.size);
+                }
+            }
         }
     }
 }
@@ -215,23 +496,29 @@ pub fn worker_main() -> Result<(), Failure> {
     setrlimit(Resource::RLIMIT_CORE, 0, 0).map_err(|_| worker_failure())?;
     let mut input = BufReader::new(io::stdin());
     let mut spec: WorkerSpec = read_frame(&mut input)?;
-    let supervisor = Supervisor::start(input, Duration::from_secs(spec.profile.timeout_seconds))?;
+    let supervisor = Supervisor::start(
+        input,
+        Duration::from_secs(spec.profile.timeout_seconds),
+        spec.input,
+    )?;
     let result = spec
         .profile
         .validate()
         .and_then(|()| spec.profile.authorize(&spec.argv))
-        .and_then(|()| execute(&spec, &supervisor));
+        .and_then(|()| execute(&mut spec, &supervisor));
     supervisor.cleanup();
-    match result {
-        Ok(exit_code) => write_frame(&mut io::stdout().lock(), &Response::Finished { exit_code }),
-        Err(failure) => write_frame(
-            &mut io::stdout().lock(),
-            &Response::Error {
-                code: failure.code,
-                message: failure.message,
-            },
-        ),
-    }
+    let response = match result {
+        Ok(exit_code) => Response::Finished { exit_code },
+        Err(error) => Response::Error {
+            code: error.code,
+            message: error.message,
+        },
+    };
+    emit(response)
+}
+
+fn emit(response: Response) -> Result<(), Failure> {
+    write_frame(&mut io::stdout().lock(), &WorkerFrame::Output { response })
 }
 
 fn clean_command(executable: impl AsRef<OsStr>) -> Command {
@@ -246,63 +533,38 @@ fn clean_command(executable: impl AsRef<OsStr>) -> Command {
     command
 }
 
-fn resolve(
-    profile: &Profile,
-    supervisor: &Supervisor,
-) -> Result<BTreeMap<String, Vec<u8>>, Failure> {
-    let mut credentials = BTreeMap::new();
-    let mut total: usize = 0;
-    for (name, reference) in &profile.credentials {
-        if supervisor.cancelled() {
-            return Err(Failure::new(
-                "cancelled",
-                "Command execution was cancelled.",
-            ));
-        }
-        let value = match profile.provider {
-            Provider::Fake => reference
-                .strip_prefix("fake://")
-                .map(|name| format!("latchrun-fake-{name}").into_bytes())
-                .ok_or_else(provider_failure)?,
-            Provider::OnePassword => read_one_password(profile, reference, supervisor)?,
-        };
-        total = total.saturating_add(value.len());
-        if value.is_empty() || value.contains(&0) || total > SECRET_LIMIT {
-            return Err(provider_failure());
-        }
-        credentials.insert(name.clone(), value);
-    }
-    Ok(credentials)
-}
-
-fn read_one_password(
-    profile: &Profile,
-    reference: &str,
+pub fn read_provider(
+    executable: &Path,
+    arguments: &[&str],
     supervisor: &Supervisor,
 ) -> Result<Vec<u8>, Failure> {
-    let executable = profile.op_path.as_ref().ok_or_else(provider_failure)?;
     let mut command = clean_command(executable);
-    command.args(["read", "--no-newline", reference]);
+    command.args(arguments);
     let user = User::from_uid(getuid())
-        .map_err(|_| provider_failure())?
-        .ok_or_else(provider_failure)?;
-    command.env("HOME", user.dir);
+        .map_err(|_| providers::failure())?
+        .ok_or_else(providers::failure)?;
+    command
+        .env("HOME", user.dir)
+        .env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin");
     let mut child = supervisor
         .spawn(&mut command)
-        .map_err(|_| provider_failure())?;
-    let output = child.stdout.take().ok_or_else(provider_failure)?;
+        .map_err(|_| providers::failure())?;
+    let output = child.stdout.take().ok_or_else(providers::failure)?;
     let (sender, receiver) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = output.take(65_537).read_to_end(&mut bytes);
-        let _ = sender.send(result.map(|_| bytes));
-    });
+    thread::Builder::new()
+        .name("provider".into())
+        .spawn(move || {
+            let mut bytes = Vec::new();
+            let result = output.take(65_537).read_to_end(&mut bytes);
+            let _ = sender.send(result.map(|_| bytes));
+        })
+        .map_err(|_| providers::failure())?;
     let start = Instant::now();
     let mut status = None;
     let mut bytes = None;
     let result = loop {
         if supervisor.cancelled() || start.elapsed() > Duration::from_secs(30) {
-            break Err(provider_failure());
+            break Err(providers::failure());
         }
         if status.is_none() {
             match child.try_wait() {
@@ -310,17 +572,17 @@ fn read_one_password(
                     status = Some(exit);
                     supervisor.cleanup();
                     if !exit.success() {
-                        break Err(provider_failure());
+                        break Err(providers::failure());
                     }
                 }
                 Ok(None) => {}
-                Err(_) => break Err(provider_failure()),
+                Err(_) => break Err(providers::failure()),
             }
         }
         if bytes.is_none() {
             match receiver.try_recv() {
                 Ok(Ok(value)) if value.len() <= SECRET_LIMIT => bytes = Some(value),
-                Ok(_) | Err(mpsc::TryRecvError::Disconnected) => break Err(provider_failure()),
+                Ok(_) | Err(mpsc::TryRecvError::Disconnected) => break Err(providers::failure()),
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
@@ -336,27 +598,113 @@ fn read_one_password(
     result
 }
 
-fn execute(spec: &WorkerSpec, supervisor: &Supervisor) -> Result<i32, Failure> {
-    let executable = spec.argv.first().ok_or_else(worker_failure)?;
-    let credentials = resolve(&spec.profile, supervisor)?;
-    let secrets: Arc<Vec<Vec<u8>>> = Arc::new(credentials.values().cloned().collect());
-    let mut command = clean_command(executable);
+fn configure_environment(command: &mut Command, profile: &Profile, credentials: &Credentials) {
     command
-        .args(spec.argv.iter().skip(1))
-        .current_dir(&spec.profile.project)
-        .stderr(Stdio::piped());
-    for (name, value) in &credentials {
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("LANG", "C")
+        .envs(&profile.environment)
+        .current_dir(&profile.project);
+    for (name, value) in credentials {
         command.env(name, OsStr::from_bytes(value));
     }
-    if let Some(socket) = &spec.profile.ssh_auth_sock {
+    if let Some(socket) = &profile.ssh_auth_sock {
         command.env("SSH_AUTH_SOCK", socket);
     }
-    let mut child = supervisor.spawn(&mut command)?;
-    let stdout = child.stdout.take().ok_or_else(worker_failure)?;
-    let stderr = child.stderr.take().ok_or_else(worker_failure)?;
+}
+
+/// Runs inside the allocated terminal; preparing here preserves sandbox filter FDs.
+pub fn pty_exec_main() -> Result<(), Failure> {
+    let payload = std::env::var("LATCHRUN_PTY_SPEC").map_err(|_| worker_failure())?;
+    let mut spec: PtySpec = serde_json::from_str(&payload).map_err(|_| worker_failure())?;
+    spec.profile.validate()?;
+    spec.profile.authorize(&spec.argv)?;
+    let mut credentials = Credentials::new();
+    for name in spec.profile.credentials.keys() {
+        let value = std::env::var_os(name).ok_or_else(worker_failure)?;
+        credentials.insert(name.clone(), value.into_vec());
+    }
+    providers::validate(&spec.profile, &credentials)?;
+    let mut prepared = crate::sandbox::prepare_terminal(&spec.profile, &spec.argv)?;
+    configure_environment(&mut prepared.command, &spec.profile, &credentials);
+    prepared.command.env(
+        "TERM",
+        spec.profile
+            .environment
+            .get("TERM")
+            .map_or("xterm-256color", String::as_str),
+    );
+    if let Some(git) = &spec.profile.git_https {
+        crate::git_credentials::configure(&mut prepared.command, git)?;
+    }
+    let _ = prepared.command.exec();
+    Err(worker_failure())
+}
+
+fn execute(spec: &mut WorkerSpec, supervisor: &Supervisor) -> Result<i32, Failure> {
+    let fresh = spec.cached_credentials.is_none();
+    let credentials =
+        providers::resolve(&spec.profile, supervisor, spec.cached_credentials.take())?;
+    if fresh && spec.profile.cache_ttl_seconds > 0 {
+        write_frame(
+            &mut io::stdout().lock(),
+            &WorkerFrame::Resolved {
+                credentials: credentials.clone(),
+            },
+        )?;
+    }
+    let mut patterns: Vec<Vec<u8>> = credentials.values().cloned().collect();
+    if matches!(spec.input, InputMode::Tty) {
+        for value in credentials.values().filter(|value| value.contains(&b'\n')) {
+            let mut terminal_value = Vec::new();
+            for byte in value {
+                if *byte == b'\n' {
+                    terminal_value.push(b'\r');
+                }
+                terminal_value.push(*byte);
+            }
+            patterns.push(terminal_value);
+        }
+    }
+    let secrets = Arc::new(patterns);
     let (sender, receiver) = mpsc::sync_channel(16);
-    pump(stdout, "stdout", Arc::clone(&secrets), sender.clone());
-    pump(stderr, "stderr", secrets, sender.clone());
+    let mut child = if matches!(spec.input, InputMode::Tty) {
+        let (child, reader) = supervisor.spawn_tty(spec, &credentials)?;
+        pump(reader, "stdout", Arc::clone(&secrets), sender.clone())?;
+        child
+    } else {
+        let mut prepared = crate::sandbox::prepare(&spec.profile, &spec.argv)?;
+        configure_environment(&mut prepared.command, &spec.profile, &credentials);
+        if let Some(git) = &spec.profile.git_https {
+            crate::git_credentials::configure(&mut prepared.command, git)?;
+        }
+        prepared
+            .command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(if matches!(spec.input, InputMode::Pipe) {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            });
+        let mut child = supervisor.spawn(&mut prepared.command)?;
+        if matches!(spec.input, InputMode::Pipe) {
+            supervisor.start_input(child.stdin.take().ok_or_else(worker_failure)?)?;
+        }
+        pump(
+            child.stdout.take().ok_or_else(worker_failure)?,
+            "stdout",
+            Arc::clone(&secrets),
+            sender.clone(),
+        )?;
+        pump(
+            child.stderr.take().ok_or_else(worker_failure)?,
+            "stderr",
+            secrets,
+            sender.clone(),
+        )?;
+        child
+    };
     drop(sender);
     let result = stream_output(&mut child, &receiver, supervisor);
     supervisor.cleanup();
@@ -379,13 +727,17 @@ fn stream_output(
                 draining = Some(Instant::now());
             }
         }
-        // Even a descendant that escaped the process group cannot retain our
-        // output pipes forever after the approved direct child has exited.
+        if lock(&supervisor.state).input_error {
+            return Err(Failure::new(
+                "input_limit",
+                "Input was invalid or exceeded the bounded input buffer.",
+            ));
+        }
         if draining.is_some_and(|at: Instant| at.elapsed() >= Duration::from_secs(1)) {
             return Err(worker_failure());
         }
         match receiver.recv_timeout(POLL) {
-            Ok(frame) => write_frame(&mut io::stdout().lock(), &frame?)?,
+            Ok(frame) => emit(frame?)?,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 if let Some(exit) = status {
@@ -404,63 +756,74 @@ fn pump(
     stream: &'static str,
     secrets: Arc<Vec<Vec<u8>>>,
     sender: mpsc::SyncSender<Result<Response, Failure>>,
-) {
-    thread::spawn(move || {
-        let mut reader = reader;
-        let mut redactor = Redactor::new(secrets);
-        let mut chunk = [0_u8; 8192];
-        loop {
-            let size = match reader.read(&mut chunk) {
-                Ok(size) => size,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => {
-                    let _ = sender.send(Err(worker_failure()));
-                    return;
+) -> Result<(), Failure> {
+    thread::Builder::new()
+        .name("output".into())
+        .spawn(move || {
+            let mut reader = reader;
+            let mut redactor = Redactor::new(secrets);
+            let mut chunk = [0_u8; 8192];
+            loop {
+                let size = match reader.read(&mut chunk) {
+                    Ok(size) => size,
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => {
+                        let _ = sender.send(Err(worker_failure()));
+                        return;
+                    }
+                };
+                let data = redactor.push(&chunk[..size], size == 0);
+                for chunk in data.chunks(8192) {
+                    if sender
+                        .send(Ok(Response::Output {
+                            stream: stream.to_owned(),
+                            data: chunk.to_vec(),
+                        }))
+                        .is_err()
+                    {
+                        return;
+                    }
                 }
-            };
-            let data = redactor.push(&chunk[..size], size == 0);
-            for chunk in data.chunks(8192) {
-                if sender
-                    .send(Ok(Response::Output {
-                        stream: stream.to_owned(),
-                        data: chunk.to_vec(),
-                    }))
-                    .is_err()
-                {
+                if size == 0 {
                     return;
                 }
             }
-            if size == 0 {
-                return;
-            }
-        }
-    });
+        })
+        .map_err(|_| worker_failure())?;
+    Ok(())
 }
-
 struct Redactor {
     secrets: Arc<Vec<Vec<u8>>>,
     pending: Vec<u8>,
-    maximum: usize,
 }
 
 impl Redactor {
-    fn new(secrets: Arc<Vec<Vec<u8>>>) -> Self {
-        let maximum = secrets.iter().map(Vec::len).max().unwrap_or(1).max(1);
+    const fn new(secrets: Arc<Vec<Vec<u8>>>) -> Self {
         Self {
             secrets,
             pending: Vec::new(),
-            maximum,
         }
     }
 
     fn push(&mut self, bytes: &[u8], eof: bool) -> Vec<u8> {
+        if self.secrets.is_empty() {
+            return bytes.to_vec();
+        }
         self.pending.extend_from_slice(bytes);
         let mut output = Vec::new();
         let mut offset = 0;
-        while offset < self.pending.len()
-            && (eof || self.pending.len().saturating_sub(offset) >= self.maximum)
-        {
+        while offset < self.pending.len() {
             let remaining = &self.pending[offset..];
+            // Only a suffix that could still become a secret needs buffering.
+            // Unrelated terminal prompts must be visible before the next read.
+            if !eof
+                && self
+                    .secrets
+                    .iter()
+                    .any(|secret| secret.len() > remaining.len() && secret.starts_with(remaining))
+            {
+                break;
+            }
             let matched = self
                 .secrets
                 .iter()
@@ -496,6 +859,14 @@ mod tests {
             actual.extend(redactor.push(&[], true));
             assert_eq!(actual, b"\xff [REDACTED] [REDACTED] end [REDACTED]\x00");
         }
+    }
+
+    #[test]
+    fn unrelated_terminal_prompts_are_not_buffered() {
+        let mut redactor = Redactor::new(Arc::new(vec![b"long-private-secret".to_vec()]));
+        assert_eq!(redactor.push(b"prompt> ", false), b"prompt> ");
+        assert!(redactor.push(b"long-pr", false).is_empty());
+        assert_eq!(redactor.push(b"ivate-secret\n", false), b"[REDACTED]\n");
     }
 
     #[test]
