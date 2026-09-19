@@ -1,8 +1,16 @@
-# 0002: Public repository and MIT license
-
-Date: 2026-09-19
-Status: Accepted
-Supersedes: visibility and licensing portions of [0001](0001-project-baseline.md)
++++
+schema_version = 1
+id = "01M2XHZ6G1ZDCCHXNSQ8W2Z95C"
+title = "Public repository and MIT license"
+date = "2026-09-19"
+status = "accepted"
+tags = ["licensing", "git"]
+supersedes = []
+superseded_by = []
+depends_on = []
+related_to = ["01M2XHZ6FS4TWZ94F2J10H3M2B"]
++++
+Supersedes: visibility and licensing portions of [0001](2026-09-19_192325561_rust-project-and-development-baseline.md)
 
 ## Decision
 

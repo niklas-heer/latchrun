@@ -1,8 +1,17 @@
-# 0005: Durable usage analytics
-
-Date: 2026-09-19
++++
+schema_version = 1
+id = "01M2XHZ6GKKP68FNVZSAEZPDBX"
+title = "Durable usage analytics"
+date = "2026-09-19"
+status = "accepted"
+tags = ["tooling", "ai"]
+supersedes = []
+superseded_by = []
+depends_on = ["01M2XHZ6GDSMGWDK3D5DE9KC26"]
+related_to = []
++++
 Status: Accepted under the owner's delegated analytics implementation task; implemented
-Extends: [0004: Full runtime and integrations](0004-full-runtime-and-integrations.md)
+Extends: [0004: Full runtime and integrations](2026-09-19_192325581_full-runtime-and-integrations.md)
 
 ## Context and decision
 

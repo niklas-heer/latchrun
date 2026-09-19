@@ -6,7 +6,7 @@ Created and updated 2026-09-19. This document records product scope, implementat
 
 Latchrun is a local intermediary between a person or AI agent and commands requiring credentials. It reuses explicitly scoped work sessions, makes activity inspectable without exposing credentials, and recovers connections without replaying uncertain side effects.
 
-The owner delegated the full implementation. The original CLI/service milestone and the previously deferred interactive execution, cache, recovery journal, dashboard, agent adapter, additional providers, Git HTTPS helper and OS enforcement are now implemented. [ADR 0004](docs/decisions/0004-full-runtime-and-integrations.md) supersedes the corresponding limitations of [ADR 0003](docs/decisions/0003-session-and-execution-contract.md). [ADR 0005](docs/decisions/0005-durable-usage-analytics.md) records the subsequent durable analytics extension. See [README.md](README.md) for setup and the current CLI/profile contract.
+The owner delegated the full implementation. The original CLI/service milestone and the previously deferred interactive execution, cache, recovery journal, dashboard, agent adapter, additional providers, Git HTTPS helper and OS enforcement are now implemented. [Full runtime and integrations](docs/decisions/2026-09-19_192325581_full-runtime-and-integrations.md) supersedes the corresponding limitations of [Session and execution contract](docs/decisions/2026-09-19_192325575_session-and-execution-contract.md). [Durable usage analytics](docs/decisions/2026-09-19_192325587_durable-usage-analytics.md) records the subsequent durable analytics extension. See [README.md](README.md) for setup and the current CLI/profile contract.
 
 Implemented does not mean that every external tool, provider authorization arrangement or OS version is certified. Automated checks use fake credentials and disposable local resources. Separately authorized read-only workflow checks do not grant authority for future live credential access.
 
@@ -76,7 +76,7 @@ The requested implementation scope is complete. The next milestone is continued 
 - [Bash, Zsh and Fish compatibility](docs/shells.md)
 - [Latency benchmark and measured baseline](docs/latency.md)
 - [Release policy and Homebrew distribution](docs/releasing.md)
-- [0006: Versioning and distribution](docs/decisions/0006-versioning-and-distribution.md)
-- [0004: Full runtime and integrations](docs/decisions/0004-full-runtime-and-integrations.md)
+- [Semantic versions, generated notes and Homebrew distribution](docs/decisions/2026-09-19_192325593_semantic-versions-generated-notes-and-homebrew-distribution.md)
+- [Full runtime and integrations](docs/decisions/2026-09-19_192325581_full-runtime-and-integrations.md)
 
 Contributors do not need private infrastructure or access to a live vault to develop or run the standard checks.

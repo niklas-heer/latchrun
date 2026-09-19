@@ -1,9 +1,16 @@
-# 0001: Rust project and development baseline
-
-Date: 2026-09-19
-Status: Accepted
-
-Visibility and licensing are superseded by [0002: Public repository and MIT license](0002-publication-and-license.md). The rest of this baseline remains in effect.
++++
+schema_version = 1
+id = "01M2XHZ6FS4TWZ94F2J10H3M2B"
+title = "Rust project and development baseline"
+date = "2026-09-19"
+status = "accepted"
+tags = ["rust"]
+supersedes = []
+superseded_by = []
+depends_on = []
+related_to = []
++++
+Visibility and licensing are superseded by [0002: Public repository and MIT license](2026-09-19_192325569_public-repository-and-mit-license.md). The rest of this baseline remains in effect.
 
 ## Context and decision
 

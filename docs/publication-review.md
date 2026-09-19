@@ -11,7 +11,7 @@ Reviewed 2026-09-19 before changing repository visibility. Scope: the initial sc
 | `.dagger/main.dang`, `dagger.json`, `.github/workflows/check.yml` | Linux/macOS CI definitions, public image/action references, and cache names |
 | `.gitignore` | Exclusions for local build output, experiments, and environment files |
 | `README.md`, `AGENTS.md`, `BUILD_BRIEF.md` | Setup, contributor guidance, product requirements, security boundaries, and proposed milestones |
-| `docs/decisions/0001-project-baseline.md`, `docs/decisions/0002-publication-and-license.md` | Development baseline and public/MIT licensing decisions |
+| `docs/decisions/2026-09-19_192325561_rust-project-and-development-baseline.md`, `docs/decisions/2026-09-19_192325569_public-repository-and-mit-license.md` | Development baseline and public/MIT licensing decisions |
 | `LICENSE`, `docs/publication-review.md` | Copyright/license terms and this review |
 
 Git metadata contains the author's name and commit contact email, commit times/messages, and the GitHub owner/repository identity. The same author identity and email were already present in the owner's public dotfiles repository; attribution is intentionally retained. Documentation references 1Password and generic Git/homelab workflows but contains no actual vault references, host addresses, account credentials, or infrastructure inventory.

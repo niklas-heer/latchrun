@@ -1,9 +1,18 @@
-# 0004: Full runtime and integrations
-
-Date: 2026-09-19
++++
+schema_version = 1
+id = "01M2XHZ6GDSMGWDK3D5DE9KC26"
+title = "Full runtime and integrations"
+date = "2026-09-19"
+status = "accepted"
+tags = ["runtime"]
+supersedes = []
+superseded_by = []
+depends_on = []
+related_to = ["01M2XHZ6G7J6019K1D32XPGJ6Z"]
++++
 Status: Accepted under the owner's delegated full-implementation task; implemented
-Supersedes in part: [0003: Session and execution contract](0003-session-and-execution-contract.md)
-Extended by: [0005: Durable usage analytics](0005-durable-usage-analytics.md), which adds SQLite and reported agent activity.
+Supersedes in part: [0003: Session and execution contract](2026-09-19_192325575_session-and-execution-contract.md)
+Extended by: [0005: Durable usage analytics](2026-09-19_192325587_durable-usage-analytics.md), which adds SQLite and reported agent activity.
 
 ## Context and acceptance
 

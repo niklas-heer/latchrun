@@ -80,4 +80,4 @@ Archives contain the executable at their root, README/documentation, the MIT lic
 
 macOS builds explicitly set and verify deployment target 15.0. Linux builds use the pinned Dagger image, report the binary's required GLIBC symbol versions, and smoke-test the extracted archives on Ubuntu 24.04 runners with glibc 2.39. These are glibc builds, not musl/Alpine binaries. Older systems can try a source build but are outside the prebuilt compatibility claim.
 
-The release workflow, packaging script and [accepted distribution decision](decisions/0006-versioning-and-distribution.md) define the process. Each tag workflow records its actual platform checks; a source build or successful checksum alone is not platform verification.
+The release workflow, packaging script and [accepted distribution decision](decisions/2026-09-19_192325593_semantic-versions-generated-notes-and-homebrew-distribution.md) define the process. Each tag workflow records its actual platform checks; a source build or successful checksum alone is not platform verification.

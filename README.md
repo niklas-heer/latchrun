@@ -72,7 +72,7 @@ On an Apple M4 Mac, the release benchmark measured **53.5 ms median added latenc
 
 The OS user and profile authors remain trusted. Exact command matching controls which command may run; an approved program, shell, hook or configuration can still perform arbitrary behavior. A command receiving a credential can disclose it. Optional sandboxing restricts its filesystem and network access, and exact-value output redaction is a safeguard with documented limits.
 
-Latchrun does not confine every process or agent running as your user, revoke remote credentials, or automatically observe unrelated tools. See the [sandbox guide](docs/sandbox.md), [implementation contract](docs/decisions/0004-full-runtime-and-integrations.md) and [analytics scope](docs/analytics.md).
+Latchrun does not confine every process or agent running as your user, revoke remote credentials, or automatically observe unrelated tools. See the [sandbox guide](docs/sandbox.md), [implementation contract](docs/decisions/2026-09-19_192325581_full-runtime-and-integrations.md) and [analytics scope](docs/analytics.md).
 
 ## Service and local storage
 
@@ -214,4 +214,4 @@ Releases use Semantic Versioning and a [maintained changelog](CHANGELOG.md). Dur
 
 ## License
 
-[MIT](LICENSE). Binary archives also include [dependency license notices](THIRD_PARTY_LICENSES.txt). See the initial [publication review](docs/publication-review.md) and [publication decision](docs/decisions/0002-publication-and-license.md).
+[MIT](LICENSE). Binary archives also include [dependency license notices](THIRD_PARTY_LICENSES.txt). See the initial [publication review](docs/publication-review.md) and [publication decision](docs/decisions/2026-09-19_192325569_public-repository-and-mit-license.md).

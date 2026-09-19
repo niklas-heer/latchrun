@@ -1,8 +1,15 @@
-# 0006: Semantic versions, generated notes and Homebrew distribution
-
-Date: 2026-09-19
-Status: Accepted
-
++++
+schema_version = 1
+id = "01M2XHZ6GST73HA3J5KRQK5T6G"
+title = "Semantic versions, generated notes and Homebrew distribution"
+date = "2026-09-19"
+status = "accepted"
+tags = ["release"]
+supersedes = []
+superseded_by = []
+depends_on = []
+related_to = []
++++
 ## Decision
 
 The owner requested the first release at **0.1.0**, Semantic Versioning, Conventional Commits, a refreshed README/icon, and distribution through the existing `niklas-heer/homebrew-tap` repository. Publish versioned GitHub release archives and a matching formula in that tap. Cargo registry publication remains disabled.
