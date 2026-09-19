@@ -1,0 +1,21 @@
+[package]
+name = "latchrun"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Local command sessions with scoped credential access"
+publish = false
+
+[profile.release]
+overflow-checks = true
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

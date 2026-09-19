@@ -1,0 +1,29 @@
+[tools]
+dagger = "0.21.9"
+# Keep aligned with rust-toolchain.toml and Cargo.toml.
+rust = { version = "1.97.1", profile = "minimal", components = ["clippy", "rustfmt", "rust-analyzer", "rust-src"] }
+
+[tasks.fmt]
+description = "Format Rust source"
+run = "cargo fmt --all"
+
+[tasks.check]
+description = "Check formatting, compilation, lints, and tests"
+run = [
+  "cargo fmt --all -- --check",
+  "cargo check --locked --all-targets --all-features",
+  "cargo clippy --locked --all-targets --all-features -- -D warnings",
+  "cargo test --locked --all-features",
+]
+
+[tasks.test]
+description = "Run Rust tests"
+run = "cargo test --locked --all-features"
+
+[tasks.build]
+description = "Build the release binary"
+run = "cargo build --locked --release"
+
+[tasks.ci]
+description = "Run Linux checks in Dagger (requires a running container engine)"
+run = "dagger call ci"

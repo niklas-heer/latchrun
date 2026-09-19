@@ -1,0 +1,34 @@
+"""
+Reproducible Linux checks for Latchrun.
+"""
+type LatchrunCi {
+  pub source: Directory! @defaultPath("/") @ignorePatterns([
+    "*",
+    "!Cargo.toml",
+    "!Cargo.lock",
+    "!rust-toolchain.toml",
+    "!mise.toml",
+    "!src",
+    "!tests",
+  ])
+
+  """
+  Run native checks, build the release binary, and smoke-test help.
+  """
+  pub ci: String! {
+    container
+      .from("ghcr.io/jdx/mise:2026.9.5")
+      .withoutFile("/mise/config.toml")
+      .withWorkdir("/src")
+      .withEnvVariable("MISE_TRUSTED_CONFIG_PATHS", "/src")
+      .withFile("mise.toml", source.file("mise.toml"))
+      .withFile("rust-toolchain.toml", source.file("rust-toolchain.toml"))
+      .withExec(["mise", "install"])
+      .withDirectory("/src", source)
+      .withMountedCache("/src/target", cacheVolume("latchrun-rust-1-97-1-target"), sharing: CacheSharingMode.LOCKED)
+      .withExec(["mise", "run", "check"])
+      .withExec(["mise", "run", "build"])
+      .withExec(["./target/release/latchrun", "--help"])
+      .stdout
+  }
+}

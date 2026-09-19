@@ -1,0 +1,8 @@
+/target/
+/scratch/
+.env
+.env.*
+!.env.example
+/mise.local.toml
+/mise.*.local.toml
+.DS_Store
