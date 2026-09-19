@@ -28,6 +28,7 @@ Implemented does not mean that every external tool, provider authorization arran
 | Providers | Fake, official 1Password CLI, private existing file, password-store, explicit SSH-agent socket | Fake values and executable fixtures test environment isolation, lookup shape, failure suppression and cancellation |
 | Credential cache | Opt-in 1–900-second memory-only cache, default zero, absolute TTL and generation-safe invalidation | Cache reuse, expiry, refresh and lifecycle regression tests |
 | Child supervision | Isolated guardians, null/pipe/TTY input, terminal resize, signal forwarding, timeouts and descendant cleanup | Public runtime tests for pipe/TTY, terminal job groups, daemon death and stalled providers |
+| Shell compatibility | Bash, Zsh and Fish as callers and explicitly configured child shells | Required native macOS/Linux matrix for literal argv, credential isolation, pipe EOF, exit/signal status, PTY and sandbox execution; [versions and limits](docs/shells.md) |
 | Output | Separate pipe streams or combined terminal stream, bounded exact-value redaction, exit propagation | Every-byte-split redaction tests, terminal prompts/multiline values and large-output regression |
 | Recovery | Owner-only atomic metadata journal, durable ID reservation, preserved outcomes, interrupted/unknown recovery, pruning with tombstones | Restart, lost-response, malformed journal, capacity and persistence-failure tests |
 | Git | Existing SSH-agent mediation and built-in exact-host HTTPS credential helper without store writes | SSH socket fixture and actual local Git credential-protocol checks with fake tokens |
@@ -35,6 +36,7 @@ Implemented does not mean that every external tool, provider authorization arran
 | Dashboard | Loopback browser UI, ephemeral bearer capability, metadata/provenance, confirmed stop/refresh | HTTP authorization/origin/parser/control tests, HTML checks and browser inspection |
 | Agent adapter | MCP 2025-11-25 stdio tools for pre-created sessions, bounded redacted results, no automatic replay | Initialize/tool/policy/malformed-frame and fake execution integration tests |
 | Durable analytics | Private SQLite history, 1/7/30/90-day windows, latency/cache trends, MCP activity and explicit external reports | Public CLI pruning/restart, report deduplication, MCP outcome/recording failure and storage-path tests |
+| Latency measurement | Repeatable release CLI benchmark with direct-execution pairs, fake providers, caching, sandbox and fresh service startup | [Native macOS baseline](docs/latency.md), 100 pairs per case with normal persistence; live provider/unlock latency remains deployment-specific |
 | Development | Pinned stable Rust/mise, strict Clippy, native macOS coverage and Linux Dagger checks | Repository check/build/CI tasks; routine tests require no vault or remote infrastructure |
 
 The evidence above describes checked behaviors, not a security audit or a universal compatibility claim. Use the repository checks for the current checkout rather than relying on a historical test count. Runtime source, public integration tests and the linked guides define the concrete contract.
@@ -60,7 +62,7 @@ The requested implementation scope is complete. The next milestone is continued 
 1. Re-run native macOS and Linux checks when changing terminal, sandbox, IPC or recovery behavior; retain both OS paths in CI. Linux sandbox tests need an isolated container engine with the documented namespace/root capabilities.
 2. Validate the official provider/app authorization setup on each intended deployment OS using separately authorized targets. Fake provider fixtures do not establish that a user's live vault, GPG agent or SSH agent is configured correctly.
 3. Recheck macOS sandbox behavior after OS upgrades and Linux behavior after kernel/bubblewrap changes. Fail closed when a required capability disappears.
-4. Measure warm command overhead separately from provider lookup/unlock, process startup, redaction and command runtime before setting performance targets. Test runtime is not a latency benchmark.
+4. Repeat the [latency benchmark](docs/latency.md) on intended deployment machines and history sizes before setting performance targets. The native macOS baseline measures total warm wrapper overhead and artificial provider/cache/sandbox cases; individual stage attribution and live provider lookup/unlock require separate measurements. Test runtime and dashboard command duration are not wrapper-overhead measurements.
 5. Treat remote hosting, stronger same-user caller isolation, endpoint-specific network proxies, automatic replay, a password vault and automatic observation of unrelated agent tools as separate future scope requiring explicit requirements.
 
 ## Guides and decisions
@@ -70,6 +72,8 @@ The requested implementation scope is complete. The next milestone is continued 
 - [Dashboard authorization and controls](docs/dashboard.md)
 - [Agent setup and outcome handling](docs/agent-integration.md)
 - [Durable analytics and activity reporting](docs/analytics.md)
+- [Bash, Zsh and Fish compatibility](docs/shells.md)
+- [Latency benchmark and measured baseline](docs/latency.md)
 - [0004: Full runtime and integrations](docs/decisions/0004-full-runtime-and-integrations.md)
 
 Contributors do not need private infrastructure or access to a live vault to develop or run the standard checks.

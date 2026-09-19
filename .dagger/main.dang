@@ -10,6 +10,7 @@ type LatchrunCi {
     "!mise.toml",
     "!src",
     "!tests",
+    "!benches",
   ])
 
   """
@@ -19,10 +20,14 @@ type LatchrunCi {
     container
       .from("ghcr.io/jdx/mise:2026.9.5")
       .withExec(["apt-get", "update"])
-      .withExec(["apt-get", "install", "--yes", "--no-install-recommends", "bubblewrap"])
+      .withExec(["apt-get", "install", "--yes", "--no-install-recommends", "bubblewrap", "bash", "zsh", "fish"])
+      .withExec(["/bin/bash", "--version"])
+      .withExec(["/bin/zsh", "--version"])
+      .withExec(["/usr/bin/fish", "--version"])
       .withoutFile("/mise/config.toml")
       .withWorkdir("/src")
       .withEnvVariable("MISE_TRUSTED_CONFIG_PATHS", "/src")
+      .withEnvVariable("LATCHRUN_REQUIRE_SHELLS", "1")
       .withFile("mise.toml", source.file("mise.toml"))
       .withFile("rust-toolchain.toml", source.file("rust-toolchain.toml"))
       .withExec(["mise", "install"])

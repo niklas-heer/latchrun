@@ -81,6 +81,8 @@ latchrun session refresh interactive
 latchrun session stop interactive
 ```
 
+Bash, Zsh and Fish are covered as caller shells and configured child shells, including pipe input, exit status, PTY and sandbox execution. See [shell compatibility and the required CI matrix](docs/shells.md) for tested versions and limits.
+
 Exact known secret values are redacted across read boundaries, including terminal newline conversion. Encoded or partial secrets, values split between stdout and stderr, and other credentials discovered by a child are outside that safeguard. No command output is retained in history.
 
 ## Sandbox and workflow recipes
@@ -144,6 +146,8 @@ mise run build
 ```
 
 Stable Rust 1.97.1, rustfmt, Clippy, Rust Analyzer and rust-src are pinned; Cargo.lock is tracked. Production code forbids unsafe Rust. Serde handles typed bounded IPC, nix handles safe Unix interfaces, signal-hook forwards signals, portable-pty/terminal_size support terminals, and rusqlite with bundled SQLite stores durable usage metadata. Use `mise run fmt` to format and `mise run test` for fake-only CLI, lifecycle, recovery, provider, terminal, dashboard, agent and sandbox tests. Native sandbox tests need a functioning OS backend; install bubblewrap on Linux.
+
+`mise run bench` measures release-build CLI overhead against direct execution with fake providers, caching, persistence and the native sandbox. See [latency methodology and measured baseline](docs/latency.md). Dashboard command durations are not a measurement of added CLI overhead.
 
 `mise run ci` runs Linux checks through Dagger 0.21.9 and its Dang SDK. Start a compatible container engine first; Colima with Docker is supported on macOS. The Linux check installs bubblewrap and enables container root capabilities for nested sandbox tests: use a trusted checkout and disposable engine/VM. This CI capability is not required by the normal service. See [sandbox test requirements](docs/sandbox.md#boundaries-and-tests).
 

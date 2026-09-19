@@ -27,3 +27,7 @@ run = "cargo build --locked --release"
 [tasks.ci]
 description = "Run Linux checks in Dagger (requires a running container engine)"
 run = "dagger call ci"
+
+[tasks.bench]
+description = "Measure release CLI latency with isolated fake providers"
+run = "cargo bench --locked --bench latency"
