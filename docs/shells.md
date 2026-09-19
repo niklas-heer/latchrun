@@ -26,6 +26,8 @@ These options follow the official [Bash invocation](https://www.gnu.org/software
 
 Caller-shell tests use disposable HOME/config directories. Child-shell fixtures use disposable `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; child HOME remains absent under Latchrun's normal environment policy. No user startup configuration, real credential provider or external service is needed. Sandboxed non-system shells receive a read grant for their installation prefix so their executable and runtime resources are accessible.
 
+Homebrew shells may load libraries from another package's Cellar directory through an `opt` symlink. When the canonical shell executable is inside `/opt/homebrew/Cellar` (Apple Silicon) or `/usr/local/Cellar` (Intel), the test profile therefore grants read access to that matching Homebrew prefix. System shells do not receive these Homebrew grants. This covers, for example, Fish loading `opt/pcre2/lib/libpcre2-8.0.dylib` outside its own version directory. These are explicit fixture permissions, not permissions automatically added by Latchrun; user profiles must likewise allow any external libraries their chosen shell needs.
+
 ## Run the matrix
 
 ```sh
@@ -44,7 +46,7 @@ LATCHRUN_REQUIRE_SHELLS=1 cargo test --test shells -- --nocapture
 
 These examples use Bourne-style environment assignments; Fish users can prefix the same assignments with `env`. Overrides are test configuration, not runtime dependencies or new command permissions. Normal discovery checks `/bin`, `/usr/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. Missing/invalid explicit overrides fail instead of silently selecting another executable. Versions print with `--nocapture` for reproducible test evidence.
 
-Linux Dagger installs Bash, Zsh and Fish and requires the complete matrix. The native macOS workflow installs Fish with Homebrew, uses the system Bash/Zsh, and also requires all three. Local application use needs only the shell you choose; the three-shell matrix is a development/CI requirement. Native sandbox tests need working Seatbelt; Linux needs the documented bubblewrap/namespace capabilities. The separate unavailable-sandbox diagnostic mode is not enabled in required CI.
+Linux Dagger installs Bash, Zsh and Fish and requires the complete matrix. The native macOS workflow runs on both Apple Silicon (`macos-latest`) and Intel (`macos-15-intel`); each installs Fish with Homebrew, uses the system Bash/Zsh, and requires all three. This exercises Homebrew libraries under both installation prefixes. Local application use needs only the shell you choose; the three-shell matrix is a development/CI requirement. Native sandbox tests need working Seatbelt; Linux needs the documented bubblewrap/namespace capabilities. The separate unavailable-sandbox diagnostic mode is not enabled in required CI.
 
 ## Verified versions
 

@@ -185,8 +185,10 @@ impl Service {
         let mut read_paths = Vec::new();
         if sandbox {
             read_paths.push(shell.path.parent().unwrap().parent().unwrap().to_path_buf());
-            if Path::new("/opt/homebrew").is_dir() {
-                read_paths.push(PathBuf::from("/opt/homebrew"));
+            for prefix in ["/opt/homebrew", "/usr/local"] {
+                if shell.path.starts_with(Path::new(prefix).join("Cellar")) {
+                    read_paths.push(PathBuf::from(prefix));
+                }
             }
             read_paths.retain(|path| path != Path::new("/"));
         }

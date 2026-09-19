@@ -22,7 +22,12 @@ jobs:
           call: ci
 
   macos:
-    runs-on: macos-latest
+    name: macos (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
     timeout-minutes: 20
     env:
       LATCHRUN_REQUIRE_SHELLS: "1"
