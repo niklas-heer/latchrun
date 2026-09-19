@@ -26,3 +26,4 @@ See [the release policy](docs/releasing.md) for versioning and compatibility.
 ### Verification
 
 - Verify shell compatibility and measure CLI latency ([d264b4e](https://github.com/niklas-heer/latchrun/commit/d264b4e41b342b4cc4b17a5473342088950df781))
+- Cover Intel Homebrew shell libraries and macOS CI ([3a19089](https://github.com/niklas-heer/latchrun/commit/3a19089aff8ac616684e4fa12063f4e8571b7862))
