@@ -1,5 +1,6 @@
 [tools]
 dagger = "0.21.9"
+git-cliff = "2.14.2"
 # Keep aligned with rust-toolchain.toml and Cargo.toml.
 rust = { version = "1.97.1", profile = "minimal", components = ["clippy", "rustfmt", "rust-analyzer", "rust-src"] }
 
@@ -31,3 +32,11 @@ run = "dagger call ci"
 [tasks.bench]
 description = "Measure release CLI latency with isolated fake providers"
 run = "cargo bench --locked --bench latency"
+
+[tasks.changelog]
+description = "Generate CHANGELOG.md from Conventional Commits (pass --tag vX.Y.Z before tagging)"
+run = "git-cliff --config cliff.toml --output CHANGELOG.md"
+
+[tasks.release-notes]
+description = "Print generated notes for the release tag at HEAD"
+run = "git-cliff --config cliff.toml --current --strip header"

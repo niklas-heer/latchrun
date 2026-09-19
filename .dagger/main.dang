@@ -11,6 +11,15 @@ type LatchrunCi {
     "!src",
     "!tests",
     "!benches",
+    "!LICENSE",
+    "!THIRD_PARTY_LICENSES.txt",
+    "!README.md",
+    "!CHANGELOG.md",
+    "!BUILD_BRIEF.md",
+    "!AGENTS.md",
+    "!examples",
+    "!docs",
+    "!scripts",
   ])
 
   """
@@ -39,5 +48,29 @@ type LatchrunCi {
       .withExec(["mise", "run", "build"])
       .withExec(["./target/release/latchrun", "--help"])
       .stdout
+  }
+
+  """
+  Check and package the current native Linux target without publishing it.
+  """
+  pub release(version: String!, target: String!, epoch: String!): Directory! {
+    container
+      .from("ghcr.io/jdx/mise:2026.9.5")
+      .withExec(["apt-get", "update"])
+      .withExec(["apt-get", "install", "--yes", "--no-install-recommends", "bubblewrap", "bash", "zsh", "fish"])
+      .withoutFile("/mise/config.toml")
+      .withWorkdir("/src")
+      .withEnvVariable("MISE_TRUSTED_CONFIG_PATHS", "/src")
+      .withEnvVariable("LATCHRUN_REQUIRE_SHELLS", "1")
+      .withFile("mise.toml", source.file("mise.toml"))
+      .withFile("rust-toolchain.toml", source.file("rust-toolchain.toml"))
+      .withExec(["mise", "install"])
+      .withDirectory("/src", source)
+      .withExec(["sh", "scripts/package-release.sh", "check", version, target])
+      .withMountedCache("/src/target", cacheVolume("latchrun-release-rust-1-97-1-target"), sharing: CacheSharingMode.LOCKED)
+      .withExec(["mise", "run", "check"], insecureRootCapabilities: true)
+      .withExec(["cargo", "build", "--locked", "--release", "--target", target])
+      .withExec(["sh", "scripts/package-release.sh", "package", version, target, epoch, "target/" + target + "/release/latchrun", "/out"])
+      .directory("/out")
   }
 }

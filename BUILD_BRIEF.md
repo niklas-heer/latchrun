@@ -38,6 +38,7 @@ Implemented does not mean that every external tool, provider authorization arran
 | Durable analytics | Private SQLite history, 1/7/30/90-day windows, latency/cache trends, MCP activity and explicit external reports | Public CLI pruning/restart, report deduplication, MCP outcome/recording failure and storage-path tests |
 | Latency measurement | Repeatable release CLI benchmark with direct-execution pairs, fake providers, caching, sandbox and fresh service startup | [Native macOS baseline](docs/latency.md), 100 pairs per case with normal persistence; live provider/unlock latency remains deployment-specific |
 | Development | Pinned stable Rust/mise, strict Clippy, native macOS coverage and Linux Dagger checks | Repository check/build/CI tasks; routine tests require no vault or remote infrastructure |
+| Distribution | SemVer from 0.1.0, Conventional Commit changelogs, four native release archives and the existing Homebrew tap | Tag/version/architecture checks, archive checksums and extracted-binary fake-provider smoke; [release procedure](docs/releasing.md) |
 
 The evidence above describes checked behaviors, not a security audit or a universal compatibility claim. Use the repository checks for the current checkout rather than relying on a historical test count. Runtime source, public integration tests and the linked guides define the concrete contract.
 
@@ -74,6 +75,8 @@ The requested implementation scope is complete. The next milestone is continued 
 - [Durable analytics and activity reporting](docs/analytics.md)
 - [Bash, Zsh and Fish compatibility](docs/shells.md)
 - [Latency benchmark and measured baseline](docs/latency.md)
+- [Release policy and Homebrew distribution](docs/releasing.md)
+- [0006: Versioning and distribution](docs/decisions/0006-versioning-and-distribution.md)
 - [0004: Full runtime and integrations](docs/decisions/0004-full-runtime-and-integrations.md)
 
 Contributors do not need private infrastructure or access to a live vault to develop or run the standard checks.

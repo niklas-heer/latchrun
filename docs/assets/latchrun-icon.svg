@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Latchrun</title>
+  <desc id="desc">A green latch framing a forward play arrow.</desc>
+  <defs>
+    <linearGradient id="surface" x1="16" y1="8" x2="112" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#203E34"/>
+      <stop offset="1" stop-color="#10251E"/>
+    </linearGradient>
+    <linearGradient id="latch" x1="29" y1="28" x2="71" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9AE6C7"/>
+      <stop offset="1" stop-color="#48B98D"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="126" height="126" rx="30" fill="url(#surface)"/>
+  <rect x="1.5" y="1.5" width="125" height="125" rx="29.5" stroke="#70CDA8" stroke-opacity=".24"/>
+  <path d="M66 33H38a5 5 0 0 0-5 5v52a5 5 0 0 0 5 5h28" stroke="url(#latch)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M64 47a3 3 0 0 1 4.6-2.54l27.6 17a3 3 0 0 1 0 5.08l-27.6 17A3 3 0 0 1 64 81V47Z" fill="#F0FFF8"/>
+</svg>

@@ -1,29 +1,82 @@
-# Latchrun
+<p align="center">
+  <img src="docs/assets/latchrun-icon.svg" alt="Latchrun icon: a latch framing a play arrow" width="104" height="104">
+</p>
 
-Scoped credentials. Persistent sessions. Controlled execution.
+<h1 align="center">Latchrun</h1>
+<p align="center"><strong>Scoped credentials. Persistent sessions. Controlled execution.</strong></p>
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#try-it-without-a-vault">Quick start</a> ·
+  <a href="docs/dashboard.md">Dashboard</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-Latchrun is a local Rust service for running approved commands with scoped credentials on macOS and Linux. It provides reusable sessions, crash recovery without command replay, redacted output, interactive terminals, an authenticated dashboard, a stdio agent adapter, and optional OS filesystem/network enforcement.
+Give an approved command the credentials it needs, then see what happened. Latchrun is a local Rust service for people and agents working on macOS and Linux. Create a scoped session, run exact approved commands, and reconnect without accidentally repeating an operation.
 
-**Status: full implementation of the current [build brief](BUILD_BRIEF.md).** The OS user and profile authors remain trusted. A command receiving a credential can disclose it; optional sandboxing restricts that command's filesystem and network access, not every process running as the same user. See the [accepted implementation decision](docs/decisions/0004-full-runtime-and-integrations.md) and [durable analytics extension](docs/decisions/0005-durable-usage-analytics.md).
+- **Keep credentials scoped.** Resolve from 1Password, password-store or an existing private file; optionally reuse them in a short-lived memory cache.
+- **Work in your terminal.** Use Bash, Zsh or Fish, stream stdin, or allocate an interactive terminal. Git SSH and HTTPS workflows are supported.
+- **Inspect the work.** Use the local dashboard, CLI or MCP adapter for session state, outcomes, latency, cache reuse and reported agent activity.
+- **Recover deliberately.** Durable operation IDs prevent replay after connection loss or restart. Optional OS sandboxing restricts filesystem and network access.
+
+**v0.1.0 is an early release.** The current [build brief](BUILD_BRIEF.md) is implemented and tested; the CLI, profile and integration APIs may change before 1.0. See the [changelog](CHANGELOG.md) and [release policy](docs/releasing.md).
+
+## Install
+
+```sh
+brew install niklas-heer/tap/latchrun
+latchrun --version
+```
+
+Homebrew installs a prebuilt binary for macOS 15+ (Apple Silicon or Intel) and Linux with glibc 2.39+ (ARM64 or x86_64); no Rust toolchain is needed. You can also download archives and checksums from [GitHub Releases](https://github.com/niklas-heer/latchrun/releases). See [release platform requirements](docs/releasing.md#build-and-publish) for details.
+
+For a source build, clone this repository and follow [Development and CI](#development-and-ci). Credential providers and sandbox backends are optional dependencies: install the tools for the workflows you enable. Latchrun does not start a service at login.
 
 ## Try it without a vault
 
-Build with `mise run build`, then run these from the checkout:
+Download the public fake profile, then start a session:
 
 ```sh
-./target/release/latchrun service start
-./target/release/latchrun session start demo --profile examples/fake.json
-./target/release/latchrun run demo --operation demo-1 -- /usr/bin/printenv TEST_SECRET
-./target/release/latchrun session reconnect demo
-./target/release/latchrun inspect demo
-./target/release/latchrun events demo
-./target/release/latchrun session stop demo
-./target/release/latchrun service stop
+curl --fail --location --output latchrun-demo.json \
+  https://raw.githubusercontent.com/niklas-heer/latchrun/v0.1.0/examples/fake.json
+latchrun service start
+latchrun session start demo --profile latchrun-demo.json
+latchrun run demo --operation demo-1 -- /usr/bin/printenv TEST_SECRET
+latchrun session reconnect demo
+latchrun inspect demo
+latchrun dashboard serve
 ```
 
-The child receives the public fake credential `latchrun-fake-demo`; its output is `[REDACTED]`. Address a session by name or its returned random ID. Every deliberate execution needs a new operation ID: reusing `demo-1` is rejected, including after service restart. Omitting `--operation` generates an ID and prints it on stderr before submission. The commands below assume `latchrun` is on PATH; otherwise use `./target/release/latchrun`.
+The command receives the public fake credential `latchrun-fake-demo`; its output is `[REDACTED]`. Open the private URL printed by `dashboard serve` to explore sessions and analytics. That command runs in the foreground; press Ctrl-C to close the dashboard, then clean up:
 
-`service start` starts a background service; `service serve` runs it in the foreground. `service status` reports health and counts. The default runtime is `/tmp/latchrun-<uid>`; select another with `--runtime-dir PATH` before the command, or `LATCHRUN_RUNTIME_DIR`. Use an absolute path no longer than 80 bytes whose parent exists. An existing runtime directory must be owned by you, mode `0700`, and not a symlink. The socket and metadata journal are owner-only. The runtime contains the lock, socket, `history.json`, and transient journal files during atomic writes. Durable usage analytics live separately in `analytics.sqlite3`; see [data paths and retention](docs/analytics.md#storage-and-lifecycle). Keep it between restarts to retain operation-ID protection; `/tmp` can be cleared by the OS.
+```sh
+latchrun session stop demo
+latchrun service stop
+```
+
+From a source checkout, use `examples/fake.json` directly and replace `latchrun` with `./target/release/latchrun` if it is not on PATH. Address sessions by name or their returned random ID. Every deliberate execution needs a new operation ID: reusing `demo-1` is rejected, including after service restart. Omitting `--operation` generates an ID and prints it on stderr before submission.
+
+## Compatibility and measured latency
+
+Bash, Zsh and Fish are tested as both caller shells and explicitly configured child shells, including stdin, exit status, PTYs and sandboxed execution:
+
+| Platform tested | Bash | Zsh | Fish |
+| --- | --- | --- | --- |
+| macOS arm64 | 3.2.57 | 5.9 | 4.9.3 |
+| Linux arm64, Dagger | 5.2.37 | 5.9 | 4.0.2 |
+
+These are verified versions, not a certification of every shell or startup configuration. See [shell compatibility](docs/shells.md) for the required CI matrix and limits.
+
+On an Apple M4 Mac, the release benchmark measured **53.5 ms median added latency** for a warm service running a command without credentials, with normal journal and analytics persistence. That is one host and 100 paired measurements, not a universal latency promise. Provider lookup, unlocking, sandboxing and workload can add time. See the [full baseline and reproducible benchmark](docs/latency.md).
+
+## Safety and scope
+
+The OS user and profile authors remain trusted. Exact command matching controls which command may run; an approved program, shell, hook or configuration can still perform arbitrary behavior. A command receiving a credential can disclose it. Optional sandboxing restricts its filesystem and network access, and exact-value output redaction is a safeguard with documented limits.
+
+Latchrun does not confine every process or agent running as your user, revoke remote credentials, or automatically observe unrelated tools. See the [sandbox guide](docs/sandbox.md), [implementation contract](docs/decisions/0004-full-runtime-and-integrations.md) and [analytics scope](docs/analytics.md).
+
+## Service and local storage
+
+`service start` starts a background service; `service serve` runs it in the foreground. `service status` reports health and counts. The default runtime is `/tmp/latchrun-<uid>`; select another with `--runtime-dir PATH` before the command, or `LATCHRUN_RUNTIME_DIR`. Use an absolute path no longer than 80 bytes whose parent exists. An existing runtime directory must be owned by you, mode `0700`, and not a symlink. The socket and metadata journal are owner-only. The runtime contains the lock, socket, `history.json`, and transient journal files during atomic writes. Durable usage analytics live separately in `analytics.sqlite3`; see [data paths and retention](docs/analytics.md#storage-and-lifecycle). Keep the runtime between restarts to retain operation-ID protection; `/tmp` can be cleared by the OS.
 
 ## Profiles and exact command policy
 
@@ -127,7 +180,7 @@ The MCP adapter records advertised tool calls automatically. Other integrations 
 
 ## Dashboard and agent integration
 
-Run `latchrun dashboard serve` and open the private startup URL. The loopback-only dashboard shows sessions, outcomes, events and environment provenance, with authenticated stop/refresh controls. Its ephemeral URL capability authorizes those controls; do not share it or expose the listener through a proxy. See [dashboard usage and browser authorization](docs/dashboard.md).
+Run `latchrun dashboard serve` and open the private startup URL. The loopback-only dashboard shows historical outcome charts, latency percentiles, cache reuse and reported agent activity alongside live sessions, events and environment provenance, with authenticated stop/refresh controls. Its ephemeral URL capability authorizes those controls; do not share it or expose the listener through a proxy. See [dashboard usage and browser authorization](docs/dashboard.md).
 
 Run `latchrun agent serve` as a stdio MCP server for an agent. It implements MCP 2025-11-25 tools for status, events, inspection, analytics, stop, refresh and exact execution in operator-created sessions. It does not create profiles/sessions, expose credentials, or support interactive input. See [agent setup and retry rules](docs/agent-integration.md).
 
@@ -155,6 +208,10 @@ GitHub Actions retains native macOS and Linux Dagger coverage for formatting, co
 
 Read [AGENTS.md](AGENTS.md). Never put real secrets in fixtures, output or tracked files. Disposable experiments belong in ignored `scratch/`.
 
+## Releases and contributions
+
+Releases use Semantic Versioning and a [maintained changelog](CHANGELOG.md). During the `0.x` series, minor releases may change public interfaces; review the notes before upgrading. Commit messages follow Conventional Commits, such as `feat: add a provider` or `fix: preserve terminal exit status`. See [release and compatibility policy](docs/releasing.md) for the tagging and publication process.
+
 ## License
 
-[MIT](LICENSE). See the initial [publication review](docs/publication-review.md) and [publication decision](docs/decisions/0002-publication-and-license.md).
+[MIT](LICENSE). Binary archives also include [dependency license notices](THIRD_PARTY_LICENSES.txt). See the initial [publication review](docs/publication-review.md) and [publication decision](docs/decisions/0002-publication-and-license.md).
