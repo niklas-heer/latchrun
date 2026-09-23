@@ -639,6 +639,10 @@ impl State {
             json!({"name":"PATH","source":"fixed","presence":true,"precedence":0,"value":"/usr/bin:/bin"}),
             json!({"name":"LANG","source":"fixed","presence":true,"precedence":0,"value":"C"}),
         ];
+        let home = execution::user_home();
+        environment.push(
+            json!({"name":"HOME","source":"fixed","presence":home.is_some(),"precedence":0,"value":home.map(|path| path.to_string_lossy().into_owned())}),
+        );
         for (name, value) in &entry.profile.environment {
             let mut item = json!({"name":name,"source":"profile","presence":true,"precedence":1});
             if entry.profile.expose_environment.contains(name) {
