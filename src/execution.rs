@@ -599,12 +599,19 @@ pub fn read_provider(
 }
 
 fn configure_environment(command: &mut Command, profile: &Profile, credentials: &Credentials) {
+    let home = User::from_uid(getuid())
+        .ok()
+        .flatten()
+        .map(|user| user.dir);
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("LANG", "C")
         .envs(&profile.environment)
         .current_dir(&profile.project);
+    if let Some(home) = home {
+        command.env("HOME", home);
+    }
     for (name, value) in credentials {
         command.env(name, OsStr::from_bytes(value));
     }
