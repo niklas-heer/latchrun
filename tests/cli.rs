@@ -24,6 +24,7 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use nix::unistd::{User, getuid};
 
 const FAKE_SECRET: &str = "latchrun-fake-test";
 const REDACTED: &str = "[REDACTED]";
@@ -366,7 +367,11 @@ fn approved_commands_receive_home_without_ambient_environment() {
         script,
     ]);
     assert_success(&output, "approved command HOME");
-    assert_eq!(stdout(&output).trim(), env::var("HOME").expect("test HOME"));
+    let expected_home = User::from_uid(getuid())
+        .expect("lookup test user")
+        .expect("test user")
+        .dir;
+    assert_eq!(stdout(&output).trim(), expected_home.to_str().expect("utf-8 home"));
 }
 
 #[test]
