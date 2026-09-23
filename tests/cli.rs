@@ -348,6 +348,28 @@ fn session_lifecycle_reuses_a_snapshot_and_exposes_only_safe_metadata() {
 }
 
 #[test]
+fn approved_commands_receive_home_without_ambient_environment() {
+    let service = Service::start();
+    let profile_path = service.path("home.json");
+    let script = "test -z \"$LATCHRUN_TEST_AMBIENT\" && printf '%s\\n' \"$HOME\"";
+    write_profile(&profile_path, &service.runtime_dir, script, 30, 3_600);
+    let session = start_session(&service, "home", &profile_path);
+
+    let output = service.invoke([
+        "run",
+        &session,
+        "--operation",
+        "home-environment",
+        "--",
+        "/bin/sh",
+        "-c",
+        script,
+    ]);
+    assert_success(&output, "approved command HOME");
+    assert_eq!(stdout(&output).trim(), env::var("HOME").expect("test HOME"));
+}
+
+#[test]
 fn child_output_is_redacted_and_exit_status_is_preserved() {
     let service = Service::start();
     let profile_path = service.path("redaction.json");
