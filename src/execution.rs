@@ -599,10 +599,7 @@ pub fn read_provider(
 }
 
 fn configure_environment(command: &mut Command, profile: &Profile, credentials: &Credentials) {
-    let home = User::from_uid(getuid())
-        .ok()
-        .flatten()
-        .map(|user| user.dir);
+    let home = User::from_uid(getuid()).ok().flatten().map(|user| user.dir);
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
