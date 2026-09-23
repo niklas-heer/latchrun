@@ -20,7 +20,7 @@ use std::{
         ffi::{OsStrExt, OsStringExt},
         process::{CommandExt, ExitStatusExt},
     },
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -540,11 +540,9 @@ pub fn read_provider(
 ) -> Result<Vec<u8>, Failure> {
     let mut command = clean_command(executable);
     command.args(arguments);
-    let user = User::from_uid(getuid())
-        .map_err(|_| providers::failure())?
-        .ok_or_else(providers::failure)?;
+    let home = user_home().ok_or_else(providers::failure)?;
     command
-        .env("HOME", user.dir)
+        .env("HOME", home)
         .env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin");
     let mut child = supervisor
         .spawn(&mut command)
@@ -598,13 +596,23 @@ pub fn read_provider(
     result
 }
 
+/// Home directory of the current OS account from the account database, never from
+/// the ambient environment. `None` when the account has no home entry.
+pub fn user_home() -> Option<PathBuf> {
+    User::from_uid(getuid()).ok().flatten().map(|user| user.dir)
+}
+
 fn configure_environment(command: &mut Command, profile: &Profile, credentials: &Credentials) {
+    let home = user_home();
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("LANG", "C")
         .envs(&profile.environment)
         .current_dir(&profile.project);
+    if let Some(home) = home {
+        command.env("HOME", home);
+    }
     for (name, value) in credentials {
         command.env(name, OsStr::from_bytes(value));
     }

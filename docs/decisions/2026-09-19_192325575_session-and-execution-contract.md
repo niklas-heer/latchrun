@@ -8,11 +8,12 @@ tags = ["architecture"]
 supersedes = []
 superseded_by = []
 depends_on = []
-related_to = ["01M2XHZ6FS4TWZ94F2J10H3M2B", "01M2XHZ6GDSMGWDK3D5DE9KC26"]
+related_to = ["01M2XHZ6FS4TWZ94F2J10H3M2B", "01M2XHZ6GDSMGWDK3D5DE9KC26", "01M37H4QW35BBZPPYTCNKFCRQW"]
 +++
 Status: Accepted and implemented under the owner's delegated full-implementation task
 Supersedes: the dependency-free scaffold status in [0001](2026-09-19_192325561_rust-project-and-development-baseline.md)
 Superseded in part by: [0004: Full runtime and integrations](2026-09-19_192325581_full-runtime-and-integrations.md); the original milestone and evidence below are preserved as history.
+Amended in part by: [Approved commands receive the OS account home directory](2026-09-23_162122947_approved-commands-receive-the-os-account-home-directory.md); approved commands now also receive a fixed `HOME`.
 
 ## Decision
 

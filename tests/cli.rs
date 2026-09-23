@@ -6,6 +6,7 @@
     clippy::unwrap_used
 )]
 
+use nix::unistd::{User, getuid};
 use std::{
     env, fs,
     io::{BufRead, BufReader, Write},
@@ -319,6 +320,8 @@ fn session_lifecycle_reuses_a_snapshot_and_exposes_only_safe_metadata() {
     assert!(inspect_json.contains("declared"));
     assert!(inspect_json.contains("resolved_per_operation"));
     assert!(inspect_json.contains("\"values_available\":false"));
+    assert!(inspect_json.contains("\"HOME\""));
+    assert!(inspect_json.contains(os_user_home().to_str().expect("utf-8 home")));
     assert!(!inspect_json.contains(FAKE_SECRET));
     assert!(!inspect_json.contains("fake://test"));
     assert!(!inspect_json.contains(script));
@@ -345,6 +348,38 @@ fn session_lifecycle_reuses_a_snapshot_and_exposes_only_safe_metadata() {
     ]);
     assert!(!after_stop.status.success());
     assert_no_secret(&after_stop);
+}
+
+#[test]
+fn approved_commands_receive_home_without_ambient_environment() {
+    let service = Service::start();
+    let profile_path = service.path("home.json");
+    let script = "test -z \"$LATCHRUN_TEST_AMBIENT\" && printf '%s\\n' \"$HOME\"";
+    write_profile(&profile_path, &service.runtime_dir, script, 30, 3_600);
+    let session = start_session(&service, "home", &profile_path);
+
+    let output = service.invoke([
+        "run",
+        &session,
+        "--operation",
+        "home-environment",
+        "--",
+        "/bin/sh",
+        "-c",
+        script,
+    ]);
+    assert_success(&output, "approved command HOME");
+    assert_eq!(
+        stdout(&output).trim(),
+        os_user_home().to_str().expect("utf-8 home")
+    );
+}
+
+fn os_user_home() -> PathBuf {
+    User::from_uid(getuid())
+        .expect("lookup test user")
+        .expect("test user")
+        .dir
 }
 
 #[test]
