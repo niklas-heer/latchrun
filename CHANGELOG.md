@@ -3,6 +3,16 @@
 Generated from [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 See [the release policy](docs/releasing.md) for versioning and compatibility.
 
+## [0.1.1](https://github.com/niklas-heer/latchrun/releases/tag/v0.1.1) — 2026-09-23
+
+### Fixes
+
+- Provide the OS account's HOME to approved commands ([3615151](https://github.com/niklas-heer/latchrun/commit/361515184ade867f3083b9a370c6a31562a71540))
+
+### Maintenance
+
+- **decisions:** Migrate decision records to the vrdx format ([7370233](https://github.com/niklas-heer/latchrun/commit/737023346efafcd5e495843733c4ec2694b01e4f))
+
 ## [0.1.0](https://github.com/niklas-heer/latchrun/releases/tag/v0.1.0) — 2026-09-19
 
 ### Build and delivery

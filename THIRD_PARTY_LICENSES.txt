@@ -575,7 +575,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 -------------------------------------------------------------------------------
 MIT License (MIT)
 -------------------------------------------------------------------------------
-Crate: latchrun 0.1.0
+Crate: latchrun 0.1.1
 Source: https://github.com/niklas-heer/latchrun
 
 MIT License
@@ -844,4 +844,4 @@ a legal notice, here is a blessing:
    May you find forgiveness for yourself and forgive others.
    May you share freely, never taking more than you give.
 
-Cargo.lock SHA-256: 9393f6f0a62dc3ec45bb2ffc49047cea107034a1248616db3ec232835c0336ec
+Cargo.lock SHA-256: 17ac4a3ed71c9e30a877fa17842ec9361875004a0b5963f8928c4904adebeba9
