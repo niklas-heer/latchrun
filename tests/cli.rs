@@ -320,6 +320,8 @@ fn session_lifecycle_reuses_a_snapshot_and_exposes_only_safe_metadata() {
     assert!(inspect_json.contains("declared"));
     assert!(inspect_json.contains("resolved_per_operation"));
     assert!(inspect_json.contains("\"values_available\":false"));
+    assert!(inspect_json.contains("\"HOME\""));
+    assert!(inspect_json.contains(os_user_home().to_str().expect("utf-8 home")));
     assert!(!inspect_json.contains(FAKE_SECRET));
     assert!(!inspect_json.contains("fake://test"));
     assert!(!inspect_json.contains(script));
@@ -367,14 +369,17 @@ fn approved_commands_receive_home_without_ambient_environment() {
         script,
     ]);
     assert_success(&output, "approved command HOME");
-    let expected_home = User::from_uid(getuid())
-        .expect("lookup test user")
-        .expect("test user")
-        .dir;
     assert_eq!(
         stdout(&output).trim(),
-        expected_home.to_str().expect("utf-8 home")
+        os_user_home().to_str().expect("utf-8 home")
     );
+}
+
+fn os_user_home() -> PathBuf {
+    User::from_uid(getuid())
+        .expect("lookup test user")
+        .expect("test user")
+        .dir
 }
 
 #[test]
