@@ -13,6 +13,11 @@ See [the release policy](docs/releasing.md) for versioning and compatibility.
 
 - Provide home to approved commands ([9f09688](https://github.com/niklas-heer/latchrun/commit/9f09688d0e2b02788492f1b035aa2a6f9d088a64))
 - Restart stale latchrun services ([3c034c4](https://github.com/niklas-heer/latchrun/commit/3c034c4a36dbfb315a656e98b86f35e6acbbcb3c))
+## [0.1.1](https://github.com/niklas-heer/latchrun/releases/tag/v0.1.1) — 2026-09-23
+
+### Fixes
+
+- Provide the OS account's HOME to approved commands ([3615151](https://github.com/niklas-heer/latchrun/commit/361515184ade867f3083b9a370c6a31562a71540))
 
 ### Maintenance
 

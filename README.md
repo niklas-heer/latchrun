@@ -29,6 +29,12 @@ latchrun --version
 
 Homebrew installs a prebuilt binary for macOS 15+ (Apple Silicon or Intel) and Linux with glibc 2.39+ (ARM64 or x86_64); no Rust toolchain is needed. You can also download archives and checksums from [GitHub Releases](https://github.com/niklas-heer/latchrun/releases). See [release platform requirements](docs/releasing.md#build-and-publish) for details.
 
+With [Nix](https://nixos.org) flakes on Linux or Apple Silicon macOS, build and install the latest `main` from source:
+
+```sh
+nix profile add github:niklas-heer/latchrun
+```
+
 For a source build, clone this repository and follow [Development and CI](#development-and-ci). Credential providers and sandbox backends are optional dependencies: install the tools for the workflows you enable. Latchrun does not start a service at login.
 
 ## Try it without a vault
