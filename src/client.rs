@@ -305,9 +305,22 @@ fn show(runtime: &Path, query: &Request) -> Result<i32, Failure> {
 
 fn start_service(runtime: &Path, data: &Path) -> Result<(), Failure> {
     prepare_runtime(runtime)?;
-    if matches!(request(runtime, &Request::Ping {}), Ok(Response::Ok { .. })) {
-        show(runtime, &Request::Ping {})?;
-        return Ok(());
+    if let Ok(Response::Ok { data: status }) = request(runtime, &Request::Ping {}) {
+        if status.get("version").and_then(serde_json::Value::as_str)
+            == Some(env!("CARGO_PKG_VERSION"))
+        {
+            show(runtime, &Request::Ping {})?;
+            return Ok(());
+        }
+
+        let _ = request(runtime, &Request::Shutdown {});
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if request(runtime, &Request::Ping {}).is_err() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
     let mut child = Command::new(env::current_exe()?)
         .args([
