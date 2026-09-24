@@ -363,6 +363,8 @@ fn valid_env(name: &str) -> bool {
         && ![
             "PATH",
             "HOME",
+            "USER",
+            "LOGNAME",
             "ENV",
             "BASH_ENV",
             "IFS",
