@@ -603,15 +603,18 @@ pub fn user_home() -> Option<PathBuf> {
 }
 
 fn configure_environment(command: &mut Command, profile: &Profile, credentials: &Credentials) {
-    let home = user_home();
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("LANG", "C")
         .envs(&profile.environment)
         .current_dir(&profile.project);
-    if let Some(home) = home {
-        command.env("HOME", home);
+    if let Some(user) = User::from_uid(getuid()).ok().flatten() {
+        let name = user.name;
+        command
+            .env("HOME", user.dir)
+            .env("USER", &name)
+            .env("LOGNAME", name);
     }
     for (name, value) in credentials {
         command.env(name, OsStr::from_bytes(value));
