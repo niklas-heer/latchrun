@@ -3,6 +3,13 @@
 Generated from [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 See [the release policy](docs/releasing.md) for versioning and compatibility.
 
+## [0.1.3](https://github.com/niklas-heer/latchrun/releases/tag/v0.1.3) - 2026-09-24
+
+### Fixes
+
+- Provide the OS account identity to approved commands for keyring compatibility.
+- Reserve fixed `USER` and `LOGNAME` environment variables from profile overrides.
+
 ## [0.1.2](https://github.com/niklas-heer/latchrun/releases/tag/v0.1.2) — 2026-09-24
 
 ### Documentation
