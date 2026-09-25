@@ -613,6 +613,8 @@ mod tests {
         for name in [
             "PATH",
             "HOME",
+            "USER",
+            "LOGNAME",
             "BASH_ENV",
             "LD_PRELOAD",
             "DYLD_INSERT_LIBRARIES",

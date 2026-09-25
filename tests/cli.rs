@@ -153,6 +153,8 @@ fn start_foreground_service(runtime_dir: &Path) -> Child {
         .arg(runtime_dir)
         .args(["service", "serve"])
         .env("LATCHRUN_TEST_AMBIENT", "ambient-should-not-leak")
+        .env("USER", "ambient-user")
+        .env("LOGNAME", "ambient-user")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -322,6 +324,8 @@ fn session_lifecycle_reuses_a_snapshot_and_exposes_only_safe_metadata() {
     assert!(inspect_json.contains("\"values_available\":false"));
     assert!(inspect_json.contains("\"HOME\""));
     assert!(inspect_json.contains(os_user_home().to_str().expect("utf-8 home")));
+    assert!(inspect_json.contains("\"USER\""));
+    assert!(inspect_json.contains("\"LOGNAME\""));
     assert!(!inspect_json.contains(FAKE_SECRET));
     assert!(!inspect_json.contains("fake://test"));
     assert!(!inspect_json.contains(script));
@@ -351,10 +355,11 @@ fn session_lifecycle_reuses_a_snapshot_and_exposes_only_safe_metadata() {
 }
 
 #[test]
-fn approved_commands_receive_home_without_ambient_environment() {
+fn approved_commands_receive_account_identity_without_ambient_environment() {
     let service = Service::start();
     let profile_path = service.path("home.json");
-    let script = "test -z \"$LATCHRUN_TEST_AMBIENT\" && printf '%s\\n' \"$HOME\"";
+    let script =
+        "test -z \"$LATCHRUN_TEST_AMBIENT\" && printf '%s\\n' \"$HOME\" \"$USER\" \"$LOGNAME\"";
     write_profile(&profile_path, &service.runtime_dir, script, 30, 3_600);
     let session = start_session(&service, "home", &profile_path);
 
@@ -368,18 +373,26 @@ fn approved_commands_receive_home_without_ambient_environment() {
         "-c",
         script,
     ]);
-    assert_success(&output, "approved command HOME");
+    assert_success(&output, "approved command account identity");
+    let user = os_user();
     assert_eq!(
-        stdout(&output).trim(),
-        os_user_home().to_str().expect("utf-8 home")
+        stdout(&output).lines().collect::<Vec<_>>(),
+        [
+            user.dir.to_str().expect("utf-8 home"),
+            &user.name,
+            &user.name
+        ]
     );
 }
 
-fn os_user_home() -> PathBuf {
+fn os_user() -> User {
     User::from_uid(getuid())
         .expect("lookup test user")
         .expect("test user")
-        .dir
+}
+
+fn os_user_home() -> PathBuf {
+    os_user().dir
 }
 
 #[test]

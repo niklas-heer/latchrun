@@ -14,7 +14,7 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     io::{self, BufReader, Read, Write},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
@@ -602,20 +602,32 @@ pub fn user_home() -> Option<PathBuf> {
     User::from_uid(getuid()).ok().flatten().map(|user| user.dir)
 }
 
+/// Fixed `HOME`, `USER` and `LOGNAME` of the current OS account from the account
+/// database, never from the ambient environment. Empty when the account has no
+/// entry. Tools key their existing logins on these, for example Keychain items
+/// named after `USER`.
+pub fn account_environment() -> Vec<(&'static str, OsString)> {
+    User::from_uid(getuid())
+        .ok()
+        .flatten()
+        .map(|user| {
+            vec![
+                ("HOME", user.dir.into_os_string()),
+                ("USER", OsString::from(&user.name)),
+                ("LOGNAME", OsString::from(user.name)),
+            ]
+        })
+        .unwrap_or_default()
+}
+
 fn configure_environment(command: &mut Command, profile: &Profile, credentials: &Credentials) {
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("LANG", "C")
+        .envs(account_environment())
         .envs(&profile.environment)
         .current_dir(&profile.project);
-    if let Some(user) = User::from_uid(getuid()).ok().flatten() {
-        let name = user.name;
-        command
-            .env("HOME", user.dir)
-            .env("USER", &name)
-            .env("LOGNAME", name);
-    }
     for (name, value) in credentials {
         command.env(name, OsStr::from_bytes(value));
     }
