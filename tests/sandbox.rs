@@ -236,6 +236,76 @@ fn sandbox_network_denies_tcp_and_unix_sockets_and_allows_explicit_network() {
     }
 }
 
+// Looks up an absent item, so no secret is read and no prompt appears. Without
+// the grant, the Security framework cannot reach securityd and reports errSecParam.
+#[cfg(target_os = "macos")]
+#[test]
+fn sandbox_keychain_grant_restores_keychain_access() {
+    let fixture = Fixture::new();
+    let security = Path::new("/usr/bin/security");
+    let args = [
+        "find-generic-password",
+        "-s",
+        "latchrun-test-absent-keychain-item",
+    ];
+    for keychain in [false, true] {
+        let name = format!("keychain-{keychain}");
+        success(&fixture.start(
+            &name,
+            security,
+            &args,
+            &json!({"enabled":true,"keychain":keychain}),
+        ));
+        let output = fixture.execute(&name, security, &args);
+        if unavailable_is_expected(&output) {
+            return;
+        }
+        let diagnostics = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(44), "{diagnostics}");
+        assert_eq!(
+            diagnostics.contains("not valid"),
+            !keychain,
+            "keychain {keychain}: {diagnostics}"
+        );
+    }
+}
+
+// Offline trust evaluation of a system root: allowed network must also allow
+// the certificate checks HTTPS clients depend on.
+#[cfg(target_os = "macos")]
+#[test]
+fn sandbox_allowed_network_can_verify_system_certificates() {
+    let fixture = Fixture::new();
+    let security = Path::new("/usr/bin/security");
+    let args = [
+        "verify-cert",
+        "-L",
+        "-l",
+        "-N",
+        "-q",
+        "-c",
+        "/private/etc/ssl/cert.pem",
+    ];
+    for network in ["deny", "allow"] {
+        success(&fixture.start(
+            network,
+            security,
+            &args,
+            &json!({"enabled":true,"network":network}),
+        ));
+        let output = fixture.execute(network, security, &args);
+        if unavailable_is_expected(&output) {
+            return;
+        }
+        assert_eq!(
+            output.status.success(),
+            network == "allow",
+            "network {network}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 #[test]
 fn sandbox_probe_child() {
     if std::env::var("TEST_SECRET").as_deref() != Ok("latchrun-fake-network-probe") {
@@ -279,6 +349,9 @@ fn sandbox_rejects_implicit_protection_and_missing_or_relative_roots() {
         json!({"enabled":true,"write_paths":[fixture.root.join("missing")]}),
         json!({"enabled":true,"read_paths":["/"]}),
         json!({"enabled":true,"protected_paths":[fixture.project]}),
+        json!({"keychain":true}),
+        #[cfg(not(target_os = "macos"))]
+        json!({"enabled":true,"keychain":true}),
     ] {
         let output = fixture.start(
             "invalid",

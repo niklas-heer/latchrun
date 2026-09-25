@@ -669,7 +669,7 @@ impl State {
             );
         }
         Ok(
-            json!({"session":self.session_view(&id),"environment":environment,"credential_cache":if entry.profile.cache_ttl_seconds==0{"none"}else{"memory"},"cache_ttl_seconds":entry.profile.cache_ttl_seconds,"cache_expires_at":expires,"values_available":false,"profile_loaded":entry.status=="active","sandbox_enabled":entry.profile.sandbox.enabled}),
+            json!({"session":self.session_view(&id),"environment":environment,"credential_cache":if entry.profile.cache_ttl_seconds==0{"none"}else{"memory"},"cache_ttl_seconds":entry.profile.cache_ttl_seconds,"cache_expires_at":expires,"values_available":false,"profile_loaded":entry.status=="active","sandbox_enabled":entry.profile.sandbox.enabled,"sandbox_keychain":entry.profile.sandbox.keychain}),
         )
     }
 

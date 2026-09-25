@@ -8,10 +8,11 @@ tags = ["runtime"]
 supersedes = []
 superseded_by = []
 depends_on = []
-related_to = ["01M2XHZ6G7J6019K1D32XPGJ6Z"]
+related_to = ["01M2XHZ6G7J6019K1D32XPGJ6Z", "01M3CZ3EDSHS68RAH0RDAFYFBT"]
 +++
 Status: Accepted under the owner's delegated full-implementation task; implemented
 Supersedes in part: [0003: Session and execution contract](2026-09-19_192325575_session-and-execution-contract.md)
+Amended in part by: [Approved commands keep existing local CLI logins](2026-09-25_190132729_approved-commands-keep-existing-local-cli-logins.md); the macOS sandbox gains an opt-in `keychain` grant, and `network: "allow"` there also permits certificate trust evaluation.
 Extended by: [0005: Durable usage analytics](2026-09-19_192325587_durable-usage-analytics.md), which adds SQLite and reported agent activity.
 
 ## Context and acceptance

@@ -8,9 +8,10 @@ tags = ["runtime", "environment"]
 supersedes = []
 superseded_by = []
 depends_on = []
-related_to = ["01M2XHZ6G7J6019K1D32XPGJ6Z", "01M2XHZ6GDSMGWDK3D5DE9KC26"]
+related_to = ["01M2XHZ6G7J6019K1D32XPGJ6Z", "01M2XHZ6GDSMGWDK3D5DE9KC26", "01M3CZ3EDSHS68RAH0RDAFYFBT"]
 +++
 Status: Accepted and implemented on 2026-09-23
+Amended in part by: [Approved commands keep existing local CLI logins](2026-09-25_190132729_approved-commands-keep-existing-local-cli-logins.md); approved commands now also receive fixed `USER` and `LOGNAME`.
 Amends in part: [0003: Session and execution contract](2026-09-19_192325575_session-and-execution-contract.md), which stated that only the provider receives `HOME` and that command environments contain only fixed `PATH`/`LANG` and explicit injections. Everything else in that record stands.
 
 ## Decision

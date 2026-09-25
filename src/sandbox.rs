@@ -33,6 +33,9 @@ pub struct SandboxPolicy {
     pub write_paths: Vec<PathBuf>,
     #[serde(default)]
     pub protected_paths: Vec<PathBuf>,
+    /// macOS only: reach the user's Keychain so tools keep their existing logins.
+    #[serde(default)]
+    pub keychain: bool,
 }
 
 /// Keep this object alive until spawning: the Linux filter descriptor is owned here.
@@ -43,6 +46,12 @@ pub struct PreparedCommand {
 }
 
 pub fn validate(policy: &mut SandboxPolicy, project: &Path) -> Result<(), Failure> {
+    if policy.keychain && (!policy.enabled || !cfg!(target_os = "macos")) {
+        return Err(Failure::new(
+            "invalid_sandbox",
+            "The keychain grant requires an enabled sandbox on macOS.",
+        ));
+    }
     if !policy.enabled {
         if !policy.read_paths.is_empty()
             || !policy.write_paths.is_empty()
@@ -193,10 +202,24 @@ fn platform_prepare(
         )?;
     }
     if profile.sandbox.network == NetworkPolicy::Allow {
-        rules.push_str("(allow network*)\n");
+        // Certificate trust, matching the CA files the Linux backend mounts: the
+        // Security framework asks trustd, OpenSSL-based tools read /etc/ssl.
+        rules.push_str("(allow network*)\n(allow mach-lookup (global-name \"com.apple.trustd\") (global-name \"com.apple.trustd.agent\"))\n");
+        allow_path(&mut rules, "file-read*", Path::new("/private/etc/ssl"))?;
         if let Some(socket) = &profile.ssh_auth_sock {
             allow_path(&mut rules, "file-read* file-write*", socket)?;
         }
+    }
+    if profile.sandbox.keychain {
+        // Legacy file keychains are opened in-process; securityd and the data
+        // protection keychain are reached over these Mach services.
+        let home = crate::execution::user_home().ok_or_else(unavailable)?;
+        rules.push_str("(allow mach-lookup (global-name \"com.apple.SecurityServer\") (global-name \"com.apple.securityd.xpc\"))\n");
+        allow_path(
+            &mut rules,
+            "file-read* file-write*",
+            &home.join("Library/Keychains"),
+        )?;
     }
     for path in &profile.sandbox.protected_paths {
         writeln!(

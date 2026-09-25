@@ -28,6 +28,25 @@ Latchrun invokes the system `/usr/bin/sandbox-exec` with a generated Seatbelt pr
 
 The profile imports Apple's installed `dyld-support.sb` for OS-version-specific dynamic-loader bootstrap. It does not import `system.sb`, which would additionally grant system-agent IPC. Path strings are escaped as SBPL data; user paths cannot inject policy expressions. No profile contains secret values.
 
+With `network: "allow"`, the profile also permits certificate trust evaluation through Apple's `trustd` service and reading the system CA files under `/etc/ssl`, matching the resolver and CA files the Linux backend mounts. Without them, HTTPS clients built on the Security framework, such as Go programs, and on LibreSSL, such as `/usr/bin/curl`, cannot verify servers.
+
+### Keychain access
+
+Tools such as `gws` and `gog` keep their login in the user's Keychain. The sandbox denies it by default, so these tools fail with a Keychain error such as `One or more parameters passed to a function were not valid. (-50)`. Opt in per profile:
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "network": "allow",
+    "keychain": true,
+    "read_paths": ["/opt/homebrew/Cellar/gogcli", "/Users/example/Library/Application Support/gogcli"]
+  }
+}
+```
+
+`keychain` permits the Security framework's `com.apple.SecurityServer` and `com.apple.securityd.xpc` services and reads and writes under `~/Library/Keychains` of the current OS account. A granted command can then use any Keychain item that the Keychain's own access control lets it use outside Latchrun, and can add or change items, as the same tool can in your shell. Keychain prompts and access control remain the protection for individual items; Latchrun does not narrow them. Grant the tool's configuration directory as well, and make it writable when the tool refreshes stored tokens there. `inspect` reports the grant as `sandbox_keychain`. It requires an enabled sandbox on macOS; other platforms reject it rather than silently running without it.
+
 Apple's installed `sandbox-exec(1)` manual marks the command **deprecated**. The installed Apple SBPL files also identify themselves as private interfaces subject to change. This backend is tested on the current host, but future macOS releases can remove or change it. Missing or rejected policies fail closed. Apple's supported sandbox model for packaged apps is [App Sandbox](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox); it is not a drop-in mechanism for launching arbitrary CLI programs with per-session profiles.
 
 ## Linux
@@ -40,7 +59,7 @@ Protected directories become empty, read-only mounts. Protected files become emp
 
 Network denial combines a separate network namespace with a small seccomp filter denying `socket`, `socketpair`, and `io_uring_setup`. The filter validates the syscall architecture, rejects x32 syscall numbers, and survives descendant execution. This prevents filesystem Unix sockets from bypassing network namespace isolation. Filters are delivered through anonymous descriptors; no secret or temporary policy file is involved. See the [Linux kernel's seccomp documentation](https://docs.kernel.org/userspace-api/seccomp_filter.html) for inheritance and architecture checks. Other syscalls are not generally filtered; this is not a minimal-syscall sandbox.
 
-Network-allowed execution shares the host network and includes ordinary resolver/CA-certificate files. An explicitly selected SSH socket is mounted into the child. No other home or runtime directory is automatically mounted.
+Network-allowed execution shares the host network and includes ordinary resolver/CA-certificate files. An explicitly selected SSH socket is mounted into the child. No other home or runtime directory is automatically mounted. The macOS `keychain` grant has no Linux equivalent; a profile setting it is rejected on Linux.
 
 ## Boundaries and tests
 
