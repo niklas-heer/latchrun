@@ -3,6 +3,21 @@
 Generated from [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 See [the release policy](docs/releasing.md) for versioning and compatibility.
 
+## [0.2.0](https://github.com/niklas-heer/latchrun/releases/tag/v0.2.0) - 2026-11-09
+
+### Features
+
+- **sandbox:** Opt in to macOS Keychain access with `sandbox.keychain`, so tools that keep their login in the Keychain, such as `gog` and `gws`, work inside the sandbox ([9539309](https://github.com/niklas-heer/latchrun/commit/9539309bc86a07ef3cb83abd9edd932e88435c0e)).
+- **sandbox:** With `network: "allow"` on macOS, permit certificate trust evaluation and the system CA files so Go and LibreSSL HTTPS clients can verify servers ([9539309](https://github.com/niklas-heer/latchrun/commit/9539309bc86a07ef3cb83abd9edd932e88435c0e)).
+
+### Fixes
+
+- List `USER` and `LOGNAME` as fixed variables in `inspect` ([63d2c4a](https://github.com/niklas-heer/latchrun/commit/63d2c4a)).
+
+### Maintenance
+
+- Add tasks that clean up build output ([4664992](https://github.com/niklas-heer/latchrun/commit/4664992)).
+
 ## [0.1.3](https://github.com/niklas-heer/latchrun/releases/tag/v0.1.3) - 2026-09-24
 
 ### Fixes
