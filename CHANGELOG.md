@@ -3,6 +3,12 @@
 Generated from [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 See [the release policy](docs/releasing.md) for versioning and compatibility.
 
+## [0.3.0](https://github.com/niklas-heer/latchrun/releases/tag/v0.3.0) — 2026-11-09
+
+### Features
+
+- **session:** Grant unattended access through explicit options ([34a0a4d](https://github.com/niklas-heer/latchrun/commit/34a0a4db52c9119b72e061bd7013c4feff0625c5))
+
 ## [0.2.0](https://github.com/niklas-heer/latchrun/releases/tag/v0.2.0) - 2026-11-09
 
 ### Features
