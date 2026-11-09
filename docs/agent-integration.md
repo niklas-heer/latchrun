@@ -35,6 +35,8 @@ Configure your MCP client to launch the absolute Latchrun executable with `agent
 
 Do not put provider tokens or other secrets in the client configuration. The operator's profile contains provider references, and the guardian resolves the values independently of the agent. The adapter has no tool to create/resume sessions or change profiles.
 
+To leave agents working while you are away, start the session with [`--unattended` and `--allow`](../README.md#leaving-agents-to-work-unattended). The adapter cannot grant either itself.
+
 ## Tools
 
 The adapter advertises JSON schemas through the MCP [tools interface](https://modelcontextprotocol.io/specification/2025-11-25/server/tools). Unknown arguments are rejected. Session names/IDs and operation IDs use 1–64 ASCII letters, digits, underscores or hyphens.
@@ -46,7 +48,7 @@ The adapter advertises JSON schemas through the MCP [tools interface](https://mo
 | `latchrun_inspect` | Required `session` | Environment declarations, provenance and allowed non-secret values; no credential lookup |
 | `latchrun_stop` | Required `session` | Stop the session and active commands |
 | `latchrun_refresh` | Required `session` | Invalidate cached credentials for future commands |
-| `latchrun_run` | Required `session`, `operation`, `argv` | Execute one exact approved command with null stdin |
+| `latchrun_run` | Required `session`, `operation`, `argv` | Execute one command the session's policy allows, with null stdin |
 | `latchrun_analytics` | Optional `days`: 1, 7, 30 or 90; default 7 | Durable aggregate usage and agent/tool activity |
 
 A fake run request after initialization looks like this:

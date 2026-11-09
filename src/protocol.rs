@@ -10,6 +10,7 @@ use std::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub const MAX_FRAME: usize = 1_048_576;
+const MAX_ATTENDED_CACHE_SECONDS: u64 = 900;
 
 #[derive(Debug)]
 pub struct Failure {
@@ -113,6 +114,26 @@ pub struct CommandRule {
     pub args: Vec<String>,
 }
 
+/// How far a session may depart from the profile's exact command rules.
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandScope {
+    #[default]
+    Exact,
+    AnyArgs,
+    AnyCommand,
+}
+
+/// Per-session relaxations chosen on the command line; a profile file cannot carry them.
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SessionGrant {
+    #[serde(default)]
+    pub unattended: bool,
+    #[serde(default)]
+    pub command_scope: CommandScope,
+}
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
@@ -144,6 +165,8 @@ pub struct Profile {
     pub expose_environment: Vec<String>,
     #[serde(default)]
     pub git_https: Option<GitHttps>,
+    #[serde(default)]
+    pub grant: SessionGrant,
 }
 
 const fn default_ttl() -> u64 {
@@ -155,6 +178,11 @@ const fn default_timeout() -> u64 {
 
 impl Profile {
     pub fn validate(&mut self) -> Result<(), Failure> {
+        let cache_limit = if self.grant.unattended {
+            self.ttl_seconds
+        } else {
+            MAX_ATTENDED_CACHE_SECONDS
+        };
         if !(1..=86400).contains(&self.ttl_seconds)
             || !(1..=86400).contains(&self.timeout_seconds)
             || self.purpose.is_empty()
@@ -162,7 +190,7 @@ impl Profile {
             || self.credentials.len() > 32
             || self.commands.is_empty()
             || self.commands.len() > 64
-            || self.cache_ttl_seconds > 900
+            || self.cache_ttl_seconds > cache_limit
         {
             return Err(invalid_profile());
         }
@@ -311,15 +339,15 @@ impl Profile {
         };
         let (executable, arguments) = argv.split_first().ok_or_else(denied)?;
         let path = executable_path(Path::new(executable)).map_err(|_| denied())?;
-        if self
-            .commands
-            .iter()
-            .any(|rule| rule.executable == path && rule.args == arguments)
-        {
-            Ok(())
-        } else {
-            Err(denied())
-        }
+        let allowed = match self.grant.command_scope {
+            CommandScope::AnyCommand => true,
+            CommandScope::AnyArgs => self.commands.iter().any(|rule| rule.executable == path),
+            CommandScope::Exact => self
+                .commands
+                .iter()
+                .any(|rule| rule.executable == path && rule.args == arguments),
+        };
+        if allowed { Ok(()) } else { Err(denied()) }
     }
 }
 
@@ -425,6 +453,9 @@ pub enum Request {
         cols: u16,
     },
     Refresh {
+        session: String,
+    },
+    Warm {
         session: String,
     },
     Resume {

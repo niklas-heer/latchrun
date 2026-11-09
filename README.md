@@ -119,9 +119,37 @@ Each profile chooses one provider for its declared credentials:
 
 The 1Password adapter follows the official [read command](https://www.1password.dev/cli/reference/commands/read). External providers receive a minimal environment with HOME from the OS account; ambient `OP_*` tokens and parent-shell configuration are not inherited. Provider stdout is private and bounded, stderr is discarded, and failures return fixed instructions. Each external reference has a 30-second timeout within the operation deadline. Empty values, NUL bytes and total credentials above 64 KiB are rejected. The file provider reads operator-managed files; Latchrun does not create a credential store.
 
-`cache_ttl_seconds` defaults to **0**, meaning a fresh lookup for every operation. Set 1–900 to opt into a session-scoped, in-memory cache. Its absolute deadline starts at resolution and is not extended by reuse. Refresh, stop, expiry, resume and service restart clear it; a late lookup cannot repopulate a cleared generation. Cached values are never journaled or returned by inspection. Core dumps are disabled for the service, guardians and their children; memory zeroization and protection from OS swap are not promised.
+`cache_ttl_seconds` defaults to **0**, meaning a fresh lookup for every operation. Set 1–900 to opt into a session-scoped, in-memory cache; only [`--unattended`](#leaving-agents-to-work-unattended) can exceed 900 seconds. Its absolute deadline starts at resolution and is not extended by reuse. Refresh, stop, expiry, resume and service restart clear it; a late lookup cannot repopulate a cleared generation. Cached values are never journaled or returned by inspection. Core dumps are disabled for the service, guardians and their children; memory zeroization and protection from OS swap are not promised.
 
 Latchrun does not keep provider authorization alive or detect password-manager lock for cached/already delivered values. Provider lock and rotation affect fresh lookups according to provider policy. Stopping a child does not revoke its credential at the remote service.
+
+## Leaving agents to work unattended
+
+To step away while agents keep working, decide how long and how much when you start the session:
+
+```sh
+latchrun session start night --profile profile.json --unattended 9h --allow any-args
+```
+
+`session start` and `session resume` accept these options. They cannot be set in a profile file.
+
+| Option | Effect |
+| --- | --- |
+| `--unattended DURATION` | Sets the session and its credential cache to `DURATION` (`45m`, `9h`, at most `24h`) and resolves every credential before returning, so any password-manager prompt appears while you are there. If resolution fails, the session stops and the command exits non-zero; fix the provider and use `session resume` with the same options. |
+| `--allow any-args` | Allows any arguments to the executables listed in the profile. |
+| `--allow any-command` | Allows any absolute executable. Every command the agent runs receives the session's credentials. |
+
+With `--unattended`, the command prints `inspect` output showing `unattended`, `command_scope` and `cache_expires_at`. Check it before leaving. A widened session records an `access_widened` event. `latchrun session stop night` ends the grant at any time.
+
+Understand what this gives up. The resolved credentials stay in the service's memory for the whole duration, and locking your password manager does not remove them. `--allow any-command` makes an agent's judgment and the credentials' remote scope the only limits, apart from an enabled sandbox, which still applies.
+
+It does not cover everything a night of work may need:
+
+- The machine has to stay awake for commands to run. Unattended sessions expire by wall clock, so sleep does not extend them.
+- SSH signatures through `ssh_auth_sock` are not cached and follow the SSH agent's own approval policy.
+- `timeout_seconds` still limits each command, so raise it in the profile for long builds.
+- `session refresh`, including the `latchrun_refresh` agent tool, clears the cache, and the next lookup needs the provider again.
+- A service restart ends the grant. `session resume` needs the options again.
 
 ## Interactive input and shells
 

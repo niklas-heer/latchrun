@@ -25,8 +25,8 @@ use crate::{
     analytics::{ActivityRecord, Analytics, OperationRecord},
     execution,
     protocol::{
-        Failure, InputMode, Origin, Profile, Request, Response, random_id, read_frame, validate_id,
-        write_frame,
+        Failure, InputMode, Origin, Profile, Request, Response, SessionGrant, random_id,
+        read_frame, validate_id, write_frame,
     },
 };
 
@@ -180,13 +180,18 @@ impl State {
                 session.cache.clear();
             }
         }
+        // The monotonic clock can stop while the machine sleeps, so an unattended
+        // session also honors the wall-clock deadline it reported when granted.
+        let wall_clock = timestamp();
         let expired: Vec<String> = self
             .sessions
             .values()
             .filter(|s| {
                 s.status == "active"
-                    && now.saturating_duration_since(s.started)
+                    && (now.saturating_duration_since(s.started)
                         >= Duration::from_secs(s.profile.ttl_seconds)
+                        || (s.profile.grant.unattended
+                            && wall_clock >= s.created_at.saturating_add(s.profile.ttl_seconds)))
             })
             .map(|s| s.id.clone())
             .collect();
@@ -224,6 +229,7 @@ impl State {
             ));
         }
         let id = random_id()?;
+        let widened = profile.grant != SessionGrant::default();
         let session = Session {
             id: id.clone(),
             name,
@@ -235,6 +241,9 @@ impl State {
         };
         self.sessions.insert(id.clone(), session);
         self.record("started", Some(&id), None);
+        if widened {
+            self.record("access_widened", Some(&id), None);
+        }
         Ok(self.session_view(&id))
     }
 
@@ -584,12 +593,16 @@ impl State {
                 "Stop the current session before replacing its profile.",
             ));
         }
+        let widened = profile.grant != SessionGrant::default();
         entry.profile = profile;
         entry.status = "active";
         entry.started = Instant::now();
         entry.created_at = timestamp();
         entry.cache.clear();
         self.record("resumed", Some(&id), None);
+        if widened {
+            self.record("access_widened", Some(&id), None);
+        }
         Ok(self.session_view(&id))
     }
 
@@ -669,7 +682,7 @@ impl State {
             );
         }
         Ok(
-            json!({"session":self.session_view(&id),"environment":environment,"credential_cache":if entry.profile.cache_ttl_seconds==0{"none"}else{"memory"},"cache_ttl_seconds":entry.profile.cache_ttl_seconds,"cache_expires_at":expires,"values_available":false,"profile_loaded":entry.status=="active","sandbox_enabled":entry.profile.sandbox.enabled,"sandbox_keychain":entry.profile.sandbox.keychain}),
+            json!({"session":self.session_view(&id),"environment":environment,"credential_cache":if entry.profile.cache_ttl_seconds==0{"none"}else{"memory"},"cache_ttl_seconds":entry.profile.cache_ttl_seconds,"cache_expires_at":expires,"unattended":entry.profile.grant.unattended,"command_scope":entry.profile.grant.command_scope,"values_available":false,"profile_loaded":entry.status=="active","sandbox_enabled":entry.profile.sandbox.enabled,"sandbox_keychain":entry.profile.sandbox.keychain}),
         )
     }
 
@@ -746,7 +759,7 @@ fn dispatch(state: &mut State, request: Request) -> Result<Value, Failure> {
             }
             control(state,&session,&operation,&execution::WorkerControl::Signal{signal})
         }
-        Request::Run { .. } | Request::Shell { .. } => Err(Failure::new("invalid_request", "Invalid request.")),
+        Request::Run { .. } | Request::Shell { .. } | Request::Warm { .. } => Err(Failure::new("invalid_request", "Invalid request.")),
     }
 }
 
@@ -907,6 +920,71 @@ fn run_operation(
     let _ = child.wait();
 }
 
+/// Fills a session's credential cache without running a command. The provider
+/// runs outside the state lock, because a person may be answering its prompt.
+fn warm_credentials(state: &Shared, session: &str) -> Result<Value, Failure> {
+    let inactive = || Failure::new("session_inactive", "Session is stopped or expired.");
+    let (id, worker, generation) = {
+        let mut state = lock(state);
+        state.expire(Instant::now());
+        let id = state.session_id(session)?;
+        let entry = state
+            .sessions
+            .get(&id)
+            .filter(|entry| entry.status == "active" && !state.stopping)
+            .ok_or_else(inactive)?;
+        if entry.profile.credentials.is_empty() || entry.cache.values.is_some() {
+            return Ok(json!({"status":"ready","session":id}));
+        }
+        if entry.profile.cache_ttl_seconds == 0 {
+            return Err(Failure::new(
+                "cache_disabled",
+                "This session does not cache credentials.",
+            ));
+        }
+        let generation = entry.cache.generation;
+        let worker = execution::spawn_resolver(&entry.profile)?;
+        drop(state);
+        (id, worker, generation)
+    };
+    let execution::Worker {
+        mut child,
+        control,
+        output,
+    } = worker;
+    let mut output = BufReader::new(output);
+    let outcome = loop {
+        match read_frame::<_, execution::WorkerFrame>(&mut output) {
+            Ok(execution::WorkerFrame::Resolved { credentials }) => {
+                lock(state).cache_resolved(&id, generation, credentials);
+            }
+            Ok(execution::WorkerFrame::Output {
+                response: Response::Finished { exit_code: 0 },
+            }) => break Ok(()),
+            Ok(execution::WorkerFrame::Output {
+                response: Response::Error { code, message },
+            }) => break Err(Failure { code, message }),
+            _ => break Err(crate::providers::failure()),
+        }
+    };
+    // The guardian treats a closed control pipe as cancellation, so hold it until here.
+    drop(control);
+    let _ = child.wait();
+    outcome?;
+    let mut state = lock(state);
+    state.expire(Instant::now());
+    if state
+        .sessions
+        .get(&id)
+        .is_none_or(|entry| entry.status != "active" || entry.cache.values.is_none())
+    {
+        return Err(inactive());
+    }
+    state.persist()?;
+    drop(state);
+    Ok(json!({"status":"ready","session":id}))
+}
+
 fn handle(state: &Shared, mut stream: UnixStream) {
     let Ok(request) = read_frame::<_, Request>(&mut BufReader::new(&mut stream)) else {
         let _ = write_frame(
@@ -915,6 +993,12 @@ fn handle(state: &Shared, mut stream: UnixStream) {
         );
         return;
     };
+    if let Request::Warm { session } = &request {
+        let response = warm_credentials(state, session)
+            .map_or_else(error_response, |data| Response::Ok { data });
+        let _ = write_frame(&mut stream, &response);
+        return;
+    }
     let request = match request {
         Request::Shell {
             session,
@@ -1227,6 +1311,23 @@ mod tests {
             matches!(state.reserve("work", "operation", &argv, Origin::Cli), Err(error) if error.code == "duplicate_operation")
         );
         assert!(State::default().session_id("work").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn unattended_sessions_also_expire_by_wall_clock() -> Result<(), Failure> {
+        // A monotonic clock that stopped during machine sleep must not extend the grant.
+        let now = Instant::now();
+        let (mut attended, _) = fixture(now)?;
+        attended.expire(now);
+        assert_eq!(attended.session_view("session")["status"], "active");
+
+        let (mut unattended, _) = fixture(now)?;
+        if let Some(session) = unattended.sessions.get_mut("session") {
+            session.profile.grant.unattended = true;
+        }
+        unattended.expire(now);
+        assert_eq!(unattended.session_view("session")["status"], "expired");
         Ok(())
     }
 

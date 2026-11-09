@@ -14,8 +14,8 @@ use std::{
 };
 
 use crate::protocol::{
-    Failure, InputMode, MAX_FRAME, Origin, Profile, Request, Response, prepare_runtime, random_id,
-    read_frame, validate_id, write_frame,
+    CommandScope, Failure, InputMode, MAX_FRAME, Origin, Profile, Request, Response, SessionGrant,
+    prepare_runtime, random_id, read_frame, validate_id, write_frame,
 };
 use signal_hook::{
     consts::{SIGHUP, SIGINT, SIGTERM, SIGWINCH},
@@ -96,7 +96,9 @@ fn dispatch_cli(runtime: &Path, data: &Path, args: &[String]) -> Result<i32, Fai
         }
         ["service", "status"] => show(runtime, &Request::Ping {}),
         ["service", "stop"] => show(runtime, &Request::Shutdown {}),
-        ["session", "start", name, "--profile", path] => start_session(runtime, name, path),
+        ["session", "start", name, "--profile", path, options @ ..] => {
+            open_session(runtime, name, path, options, false)
+        }
         ["dashboard", "serve"] => {
             crate::dashboard::serve(runtime, 0)?;
             Ok(0)
@@ -115,13 +117,14 @@ fn dispatch_cli(runtime: &Path, data: &Path, args: &[String]) -> Result<i32, Fai
                 session: (*session).into(),
             },
         ),
-        ["session", "resume", session, "--profile", path] => show(
-            runtime,
-            &Request::Resume {
-                session: (*session).into(),
-                profile: load_profile(Path::new(path))?,
-            },
-        ),
+        [
+            "session",
+            "resume",
+            session,
+            "--profile",
+            path,
+            options @ ..,
+        ] => open_session(runtime, session, path, options, true),
         ["session", "status"] => show(runtime, &Request::Status { session: None }),
         ["session", "status" | "reconnect", session] => {
             validate_id(session)?;
@@ -222,15 +225,138 @@ fn statistics_cli(runtime: &Path, data: &Path, args: &[String]) -> Option<Result
     })
 }
 
-fn start_session(runtime: &Path, name: &str, path: &str) -> Result<i32, Failure> {
+#[derive(Default)]
+struct SessionOptions {
+    unattended_seconds: Option<u64>,
+    command_scope: CommandScope,
+}
+
+impl SessionOptions {
+    fn parse(mut arguments: &[&str]) -> Result<Self, Failure> {
+        let mut options = Self::default();
+        loop {
+            arguments = match arguments {
+                [] => return Ok(options),
+                ["--unattended", duration, rest @ ..] if options.unattended_seconds.is_none() => {
+                    options.unattended_seconds = Some(parse_duration(duration)?);
+                    rest
+                }
+                ["--allow", scope, rest @ ..] if options.command_scope == CommandScope::Exact => {
+                    options.command_scope = match *scope {
+                        "any-args" => CommandScope::AnyArgs,
+                        "any-command" => CommandScope::AnyCommand,
+                        _ => return Err(usage()),
+                    };
+                    rest
+                }
+                _ => return Err(usage()),
+            };
+        }
+    }
+}
+
+/// Accepts one whole number with a unit, such as `90m` or `9h`, up to the 24-hour session limit.
+fn parse_duration(value: &str) -> Result<u64, Failure> {
+    let (digits, unit_seconds) = value
+        .strip_suffix('s')
+        .map(|digits| (digits, 1))
+        .or_else(|| value.strip_suffix('m').map(|digits| (digits, 60)))
+        .or_else(|| value.strip_suffix('h').map(|digits| (digits, 3600)))
+        .ok_or_else(usage)?;
+    digits
+        .parse::<u64>()
+        .ok()
+        .and_then(|count| count.checked_mul(unit_seconds))
+        .filter(|seconds| (1..=86400).contains(seconds))
+        .ok_or_else(usage)
+}
+
+fn load_session_profile(path: &Path, options: &SessionOptions) -> Result<Profile, Failure> {
+    let mut profile = load_profile(path)?;
+    profile.grant = SessionGrant {
+        unattended: options.unattended_seconds.is_some(),
+        command_scope: options.command_scope,
+    };
+    if let Some(seconds) = options.unattended_seconds {
+        profile.ttl_seconds = seconds;
+        profile.cache_ttl_seconds = seconds;
+    }
+    profile.validate()?;
+    Ok(profile)
+}
+
+fn open_session(
+    runtime: &Path,
+    name: &str,
+    path: &str,
+    options: &[&str],
+    resume: bool,
+) -> Result<i32, Failure> {
     validate_id(name)?;
+    let options = SessionOptions::parse(options)?;
+    let profile = load_session_profile(Path::new(path), &options)?;
+    let query = if resume {
+        Request::Resume {
+            session: name.into(),
+            profile,
+        }
+    } else {
+        Request::Start {
+            name: name.into(),
+            profile,
+        }
+    };
+    establish_session(runtime, name, &query, &options)
+}
+
+/// An unattended session resolves its credentials now, so any password-manager
+/// prompt appears while the operator is present, and fails closed if that fails.
+fn establish_session(
+    runtime: &Path,
+    session: &str,
+    query: &Request,
+    options: &SessionOptions,
+) -> Result<i32, Failure> {
+    if options.unattended_seconds.is_none() {
+        return show(runtime, query);
+    }
+    match request(runtime, query)? {
+        Response::Ok { .. } => (),
+        Response::Error { code, message } => return Err(Failure { code, message }),
+        _ => return Err(Failure::new("protocol", "Unexpected service response.")),
+    }
+    if let Err(error) = warm_credentials(runtime, session) {
+        let _ = request(
+            runtime,
+            &Request::Stop {
+                session: session.into(),
+            },
+        );
+        return Err(error);
+    }
     show(
         runtime,
-        &Request::Start {
-            name: name.into(),
-            profile: load_profile(Path::new(path))?,
+        &Request::Inspect {
+            session: session.into(),
         },
     )
+}
+
+fn warm_credentials(runtime: &Path, session: &str) -> Result<(), Failure> {
+    let mut stream = connect(runtime)?;
+    write_frame(
+        &mut stream,
+        &Request::Warm {
+            session: session.into(),
+        },
+    )?;
+    // The guardian's operation deadline bounds this wait, including a person answering a prompt.
+    stream.set_read_timeout(None)?;
+    match read_frame(&mut BufReader::new(stream))? {
+        Response::Ok { .. } => Ok(()),
+        Response::Error { code, message } => Err(Failure { code, message }),
+        _ => Err(Failure::new("protocol", "Unexpected service response.")),
+    }
 }
 
 fn load_profile(path: &Path) -> Result<Profile, Failure> {
@@ -250,6 +376,12 @@ fn load_profile(path: &Path) -> Result<Profile, Failure> {
             "Profile must be valid JSON with supported fields.",
         )
     })?;
+    if profile.grant != SessionGrant::default() {
+        return Err(Failure::new(
+            "invalid_profile",
+            "Unattended access and wider command scopes are set with session options, not in a profile.",
+        ));
+    }
     profile.validate()?;
     Ok(profile)
 }
@@ -524,11 +656,11 @@ fn print_help() {
         "Latchrun — scoped credentials and persistent local work sessions.\n\n\
 Usage: latchrun [--runtime-dir PATH] [--data-dir PATH] COMMAND\n\n\
   service start | serve | status | stop\n\
-  session start NAME --profile FILE\n\
+  session start NAME --profile FILE [SESSION OPTIONS]\n\
   session status [SESSION] | reconnect SESSION | stop SESSION\n\
   run SESSION [--operation ID] [--stdin | --tty] -- /absolute/executable [ARG ...]\n\
   run SESSION [--operation ID] [--stdin | --tty] --shell SCRIPT\n\
-  session refresh SESSION | resume SESSION --profile FILE\n\
+  session refresh SESSION | resume SESSION --profile FILE [SESSION OPTIONS]\n\
   dashboard serve [--port PORT]\n\
   agent serve\n\
   history prune --keep COUNT\n\
@@ -537,6 +669,11 @@ Usage: latchrun [--runtime-dir PATH] [--data-dir PATH] COMMAND\n\n\
   inspect SESSION\n\
   events [SESSION]\n\
   --help | --version\n\n\
+Session options for start and resume, for leaving agents to work without you:\n\
+\x20\x20--unattended DURATION  Keep the session and credential cache for DURATION (90m, 9h, at most 24h)\n\
+\x20                        and resolve credentials now, so any provider prompt appears immediately.\n\
+\x20\x20--allow any-args       Allow any arguments to the profile's listed executables.\n\
+\x20\x20--allow any-command    Allow any absolute executable, and give it the session's credentials.\n\n\
 Profiles are JSON. Commands and arguments require an exact allowlist match.\n\
 Runs default to null stdin; --stdin streams input and --tty allocates a terminal.\n\
 Reconnect inspects status; it never replays commands or retained output.\n\

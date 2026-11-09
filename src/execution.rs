@@ -62,6 +62,7 @@ struct WorkerSpec {
     argv: Vec<String>,
     cached_credentials: Option<Credentials>,
     input: InputMode,
+    resolve_only: bool,
 }
 #[derive(Serialize, Deserialize)]
 struct PtySpec {
@@ -75,6 +76,27 @@ pub fn spawn(
     cached_credentials: Option<Credentials>,
     input: InputMode,
 ) -> Result<Worker, Failure> {
+    start_guardian(&WorkerSpec {
+        profile: profile.clone(),
+        argv: argv.to_vec(),
+        cached_credentials,
+        input,
+        resolve_only: false,
+    })
+}
+
+/// Starts a guardian that resolves credentials for caching and runs no command.
+pub fn spawn_resolver(profile: &Profile) -> Result<Worker, Failure> {
+    start_guardian(&WorkerSpec {
+        profile: profile.clone(),
+        argv: Vec::new(),
+        cached_credentials: None,
+        input: InputMode::Null,
+        resolve_only: true,
+    })
+}
+
+fn start_guardian(spec: &WorkerSpec) -> Result<Worker, Failure> {
     let mut child = Command::new(std::env::current_exe().map_err(|_| worker_failure())?)
         .arg("__worker")
         .process_group(0)
@@ -94,13 +116,7 @@ pub fn spawn(
         let _ = child.wait();
         return Err(worker_failure());
     };
-    let spec = WorkerSpec {
-        profile: profile.clone(),
-        argv: argv.to_vec(),
-        cached_credentials,
-        input,
-    };
-    if write_frame(&mut control, &spec).is_err() {
+    if write_frame(&mut control, spec).is_err() {
         drop(control);
         let _ = child.wait();
         return Err(worker_failure());
@@ -504,7 +520,13 @@ pub fn worker_main() -> Result<(), Failure> {
     let result = spec
         .profile
         .validate()
-        .and_then(|()| spec.profile.authorize(&spec.argv))
+        .and_then(|()| {
+            if spec.resolve_only {
+                Ok(())
+            } else {
+                spec.profile.authorize(&spec.argv)
+            }
+        })
         .and_then(|()| execute(&mut spec, &supervisor));
     supervisor.cleanup();
     let response = match result {
@@ -675,6 +697,9 @@ fn execute(spec: &mut WorkerSpec, supervisor: &Supervisor) -> Result<i32, Failur
                 credentials: credentials.clone(),
             },
         )?;
+    }
+    if spec.resolve_only {
+        return Ok(0);
     }
     let mut patterns: Vec<Vec<u8>> = credentials.values().cloned().collect();
     if matches!(spec.input, InputMode::Tty) {
