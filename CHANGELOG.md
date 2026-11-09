@@ -3,7 +3,9 @@
 Generated from [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 See [the release policy](docs/releasing.md) for versioning and compatibility.
 
-## [0.3.0](https://github.com/niklas-heer/latchrun/releases/tag/v0.3.0) — 2026-11-09
+## [0.3.1](https://github.com/niklas-heer/latchrun/releases/tag/v0.3.1) — 2026-11-09
+
+The v0.3.0 tag was never released because its packaging check failed; this is the first release with these changes.
 
 ### Features
 

@@ -40,7 +40,7 @@ This optional maintenance step needs Python 3.9+ and cargo-about 0.9.2; ordinary
 
 ## Build and publish
 
-1. Start from a clean, reviewed checkout with complete Git history and tags. Review new tracked files for credentials and private infrastructure details. Refresh dependency notices when the lockfile changes.
+1. Start from a clean, reviewed checkout with complete Git history and tags. Review new tracked files for credentials and private infrastructure details. Refresh dependency notices when the lockfile changes, including after the version bump, because the bundle records the lockfile's hash.
 2. Run `mise run check`, `mise run build` and `mise run ci`. Native macOS checks and Linux Dagger checks must pass. CI requires Bash, Zsh and Fish; local overrides are described in [shells.md](shells.md).
 3. Generate and review `CHANGELOG.md` for the chosen version, then commit it with `chore(release): prepare vX.Y.Z`. Commit release implementation changes first so the generated notes include them. Push the reviewed main branch and confirm its checks pass.
 4. Create an annotated `vX.Y.Z` tag on that exact commit and push it. Do not move or reuse published tags. The release workflow checks version/target consistency, builds native archives and uploads Actions artifacts. It does not publish a GitHub release automatically.
